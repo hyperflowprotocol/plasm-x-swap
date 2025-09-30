@@ -751,22 +751,20 @@ function App() {
   // Fetch referral earnings and custom code when claim modal opens
   useEffect(() => {
     if (showClaimModal && isConnected && account) {
-      fetch(`${window.location.origin}/api/referrer/${account}/summary`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            setReferralEarnings(data.summary);
-          }
-        })
-        .catch(err => console.error('Failed to fetch earnings:', err));
-      
       fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
         .then(res => res.json())
         .then(data => {
           setReferralCode(data.referralCode);
           setReferralCount(data.totalReferrals || 0);
+          // Set earnings from totalEarnings field
+          if (data.totalEarnings && data.totalEarnings !== '0') {
+            setReferralEarnings({
+              total_earned_wei: data.totalEarnings,
+              payable_wei: data.totalEarnings // For now, all earnings are payable
+            });
+          }
         })
-        .catch(err => console.error('Failed to fetch referral code:', err));
+        .catch(err => console.error('Failed to fetch referral stats:', err));
     }
   }, [showClaimModal, isConnected, account])
 
