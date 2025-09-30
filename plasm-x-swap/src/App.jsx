@@ -756,13 +756,12 @@ function App() {
         .then(data => {
           setReferralCode(data.referralCode);
           setReferralCount(data.totalReferrals || 0);
-          // Set earnings from totalEarnings field
-          if (data.totalEarnings && data.totalEarnings !== '0') {
-            setReferralEarnings({
-              total_earned_wei: data.totalEarnings,
-              payable_wei: data.totalEarnings // For now, all earnings are payable
-            });
-          }
+          // Always set earnings (even if zero) so UI shows the 3 boxes
+          setReferralEarnings({
+            totalEarned: data.totalEarnings || '0',
+            totalClaimed: '0', // TODO: Track claimed amounts
+            payable: data.totalEarnings || '0' // For now, all earnings are available
+          });
         })
         .catch(err => console.error('Failed to fetch referral stats:', err));
     }
