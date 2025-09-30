@@ -1966,7 +1966,7 @@ function App() {
                 </button>
                 
                 <button className="menu-item-btn" onClick={() => { setShowClaimModal(true); setShowMenu(false); }}>
-                  <span>Claim Rewards</span>
+                  <span>Referral</span>
                 </button>
                 
                 <button className="menu-item-btn" onClick={() => { 
@@ -2023,7 +2023,7 @@ function App() {
               <X size={24} />
             </button>
             <h2>Claim Referral Rewards</h2>
-            <p style={{marginBottom: '16px', color: '#888', fontSize: '13px'}}>Earn 30% of platform fees (0.6% of trade volume) from every referred trade</p>
+            <p style={{marginBottom: '16px', color: '#fff', fontSize: '13px'}}>Earn 30% of platform fees (0.6% of trade volume) from every referred trade</p>
             
             {!isConnected ? (
               <div style={{textAlign: 'center', padding: '20px'}}>
@@ -2049,7 +2049,7 @@ function App() {
                         <UserPlus size={48} color="#fff" />
                       </div>
                       <h3 style={{marginBottom: '10px', color: '#fff'}}>Create Your Referral Code</h3>
-                      <p style={{marginBottom: '20px', fontSize: '14px', color: '#888'}}>
+                      <p style={{marginBottom: '20px', fontSize: '14px', color: '#fff'}}>
                         Choose a custom code like "PlasmXLabs" to make your referral link memorable!
                       </p>
                       <button 
@@ -2172,7 +2172,7 @@ function App() {
                           Cancel
                         </button>
                       </div>
-                      <p style={{marginTop: '12px', fontSize: '12px', color: '#888', textAlign: 'center'}}>
+                      <p style={{marginTop: '12px', fontSize: '12px', color: '#fff', textAlign: 'center'}}>
                         3-20 alphanumeric characters only
                       </p>
                     </div>
@@ -2188,7 +2188,7 @@ function App() {
                         border: '1px solid #444',
                         marginBottom: '10px'
                       }}>
-                        <div style={{fontSize: '11px', color: '#666', marginBottom: '6px'}}>Your Code:</div>
+                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '6px'}}>Your Code:</div>
                         <div style={{
                           fontSize: '20px',
                           fontWeight: '900',
@@ -2201,7 +2201,7 @@ function App() {
                         </div>
                         <div style={{
                           fontSize: '12px',
-                          color: '#888',
+                          color: '#fff',
                           textAlign: 'center',
                           paddingTop: '8px',
                           borderTop: '1px solid #333'
@@ -2220,7 +2220,7 @@ function App() {
                             background: '#0a0a0a',
                             border: '1px solid #444',
                             borderRadius: '8px',
-                            color: '#888',
+                            color: '#fff',
                             fontSize: '13px',
                             fontFamily: 'monospace'
                           }}
@@ -2246,7 +2246,7 @@ function App() {
                           <Copy size={18} />
                         </button>
                       </div>
-                      <p style={{marginTop: '10px', fontSize: '11px', color: '#666', lineHeight: '1.5'}}>
+                      <p style={{marginTop: '10px', fontSize: '11px', color: '#fff', lineHeight: '1.5'}}>
                         Earn 30% of platform fees (0.6% of trade volume) from every referred trade. Paid in XPL.
                       </p>
                     </div>
@@ -2267,19 +2267,19 @@ function App() {
                   }}>
                     <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', textAlign: 'center'}}>
                       <div>
-                        <div style={{fontSize: '11px', color: '#888', marginBottom: '5px'}}>Total Earned</div>
+                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '5px'}}>Total Earned</div>
                         <div style={{fontSize: '16px', fontWeight: '600', color: '#fff'}}>
                           {(parseFloat(ethers.formatEther(referralEarnings.totalEarned || '0'))).toFixed(4)} XPL
                         </div>
                       </div>
                       <div>
-                        <div style={{fontSize: '11px', color: '#888', marginBottom: '5px'}}>Claimed</div>
+                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '5px'}}>Claimed</div>
                         <div style={{fontSize: '16px', fontWeight: '600', color: '#fff'}}>
                           {(parseFloat(ethers.formatEther(referralEarnings.totalClaimed || '0'))).toFixed(4)} XPL
                         </div>
                       </div>
                       <div>
-                        <div style={{fontSize: '11px', color: '#888', marginBottom: '5px'}}>Available</div>
+                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '5px'}}>Available</div>
                         <div style={{fontSize: '16px', fontWeight: '600', color: '#fff'}}>
                           {(parseFloat(ethers.formatEther(referralEarnings.payable || '0'))).toFixed(4)} XPL
                         </div>
@@ -2289,7 +2289,7 @@ function App() {
                 )}
                 
                 <div className="field" style={{marginBottom: '15px'}}>
-                  <label style={{display: 'block', marginBottom: '8px', color: '#aaa', fontSize: '14px'}}>
+                  <label style={{display: 'block', marginBottom: '8px', color: '#fff', fontSize: '14px'}}>
                     Amount to Claim (XPL)
                   </label>
                   <input
