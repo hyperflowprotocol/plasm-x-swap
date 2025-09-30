@@ -1,0 +1,181 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+/* Token Loading Spinner */
+.token-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #888;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(26, 255, 146, 0.2);
+  border-top: 3px solid #1aff92;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Toast Notification System */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+}
+
+.toast {
+  margin-top: 10px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #fff;
+  opacity: 0.95;
+  animation: toast-fadein 0.3s, toast-fadeout 0.5s 3.5s;
+  max-width: 350px;
+  word-wrap: break-word;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  background: #1aff92; /* Plasma green for success */
+}
+
+.toast.error {
+  background: #ff4757; /* Red for errors */
+}
+
+.toast.info {
+  background: #3742fa; /* Blue for info */
+}
+
+.toast.warning {
+  background: #ffa502; /* Orange for warnings */
+}
+
+@keyframes toast-fadein {
+  from {opacity: 0; transform: translateY(20px);}
+  to {opacity: 0.95; transform: translateY(0);}
+}
+
+@keyframes toast-fadeout {
+  from {opacity: 0.95;}
+  to {opacity: 0;}
+}
+
+/* Mobile responsive toasts */
+@media (max-width: 480px) {
+  .toast-container {
+    bottom: 10px;
+    right: 10px;
+    left: 10px;
+  }
+  
+  .toast {
+    max-width: none;
+    font-size: 13px;
+    padding: 10px 16px;
+  }
+}
+
+/* Privy Modal Custom Styling - Forest Green Background Only */
+#headlessui-portal-root [role="dialog"],
+#headlessui-portal-root div[style*="background"] {
+  background: #0d3d2f !important;
+  background-color: #0d3d2f !important;
+}
+
+/* Force forest green on modal background only */
+#headlessui-portal-root [role="dialog"] > div:first-child {
+  background: #0d3d2f !important;
+  background-color: #0d3d2f !important;
+}
+
+/* Keep wallet buttons dark/black */
+#headlessui-portal-root button {
+  background: #1a1a1a !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+  border-radius: 12px !important;
+}
+
+#headlessui-portal-root button:hover {
+  background: #2a2a2a !important;
+  border-color: rgba(29, 185, 84, 0.5) !important;
+}
