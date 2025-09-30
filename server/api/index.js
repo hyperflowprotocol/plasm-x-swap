@@ -149,15 +149,13 @@ app.post('/api/track-swap', async (req, res) => {
     // Calculate 2% platform fee
     const platformFeeWei = (BigInt(grossAmountWei) * BigInt(2) / BigInt(100)).toString();
     
-    // Check if user has a referrer
-    const referrerData = await db.getReferrer(userAddress);
+    // Check if user has a referrer (returns address string or null)
+    const referrerAddress = await db.getReferrer(userAddress);
     
-    let referrerAddress = null;
     let referrerCutWei = '0';
     let platformCutWei = platformFeeWei;
     
-    if (referrerData) {
-      referrerAddress = referrerData.referrer_address;
+    if (referrerAddress) {
       // 30% of platform fee goes to referrer
       referrerCutWei = (BigInt(platformFeeWei) * BigInt(30) / BigInt(100)).toString();
       // 70% stays with platform
@@ -170,7 +168,7 @@ app.post('/api/track-swap', async (req, res) => {
       console.log(`💵 Platform fee: ${platformFeeWei} wei (100% to platform)`);
     }
     
-    // Log swap to database
+    // Log swap to database (this also calls updateReferralEarnings internally)
     const swapLog = await db.logSwap(
       txHash,
       userAddress,
