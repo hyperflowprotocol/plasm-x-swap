@@ -202,6 +202,13 @@ async function bindReferrerByCode(userAddress, referralCode) {
   return result.rows[0];
 }
 
+// Get earnings for a wallet (simple version for API)
+async function getReferralEarnings(walletAddress) {
+  const text = 'SELECT total_earned_wei FROM referral_earnings WHERE referrer_address = $1';
+  const result = await query(text, [walletAddress.toLowerCase()]);
+  return result.rows[0]?.total_earned_wei || '0';
+}
+
 module.exports = {
   query,
   bindReferrer,
@@ -210,8 +217,11 @@ module.exports = {
   getReferrerSummary,
   updateClaimedAmount,
   setReferralCode,
+  createReferralCode: setReferralCode, // Alias
   getReferralCode,
   getWalletFromCode,
+  getReferralCodeInfo: getWalletFromCode, // Alias
   bindReferrerByCode,
-  getReferralCount
+  getReferralCount,
+  getReferralEarnings
 };
