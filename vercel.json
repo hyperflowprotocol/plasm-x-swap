@@ -1,0 +1,12 @@
+{
+  "buildCommand": "cd plasm-x-swap && npm install && npm run build",
+  "outputDirectory": "plasm-x-swap/dist",
+  "installCommand": "cd plasm-x-swap && npm install",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
