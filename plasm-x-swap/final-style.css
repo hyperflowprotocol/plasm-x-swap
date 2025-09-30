@@ -1,0 +1,335 @@
+/* ========================================
+   PLASM X SWAP - FINAL PREMIUM STYLES
+   Professional DEX Interface with Glass Effects
+======================================== */
+
+/* ===== CARD CONTAINER ===== */
+.swap-container {
+  background: rgba(18, 47, 40, 0.95);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 20px;                 /* Internal spacing */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;                     /* Automatic uniform spacing */
+  backdrop-filter: blur(12px);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+  max-width: 420px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* ===== SWAP BUTTON (PREMIUM GRADIENT) ===== */
+.swap-btn {
+  width: 100%;
+  height: 52px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 15px;
+  margin-top: auto;              /* Always at bottom of card */
+  background: linear-gradient(90deg, #00ff85, #1db954, #39ff14);
+  color: #00160f;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 255, 133, 0.25);
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.swap-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px rgba(0, 255, 133, 0.35);
+}
+
+.swap-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+/* ===== TOKEN INPUT SECTIONS ===== */
+.token-section {
+  background: rgba(13, 43, 36, 0.8);
+  border: 1px solid rgba(57, 255, 20, 0.2);
+  border-radius: 12px;
+  padding: 16px;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.token-section:hover {
+  border-color: rgba(57, 255, 20, 0.3);
+  background: rgba(13, 43, 36, 0.9);
+}
+
+/* ===== PERCENTAGE BUTTONS ===== */
+.percentage-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.percentage-btn {
+  flex: 1;
+  height: 36px;
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: rgba(13, 43, 36, 0.6);
+  color: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.percentage-btn:hover {
+  background: rgba(57, 255, 20, 0.1);
+  border-color: rgba(57, 255, 20, 0.5);
+  color: #39ff14;
+}
+
+.percentage-btn.active,
+.percentage-btn.max-btn {
+  background: linear-gradient(135deg, #39ff14, #1db954);
+  color: #00160f;
+  border-color: #39ff14;
+  font-weight: 700;
+}
+
+/* ===== INPUT FIELDS ===== */
+.amount-input {
+  width: 100%;
+  background: rgba(13, 43, 36, 0.8);
+  border: 2px solid rgba(57, 255, 20, 0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  outline: none;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.amount-input:focus {
+  border-color: #39ff14;
+  background: rgba(13, 43, 36, 0.95);
+  box-shadow: 0 0 0 3px rgba(57, 255, 20, 0.1);
+}
+
+.amount-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ===== TOKEN SELECTORS ===== */
+.token-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(13, 43, 36, 0.8);
+  border: 1px solid rgba(57, 255, 20, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.token-selector:hover {
+  border-color: rgba(57, 255, 20, 0.4);
+  background: rgba(13, 43, 36, 0.9);
+}
+
+.token-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #39ff14, #1db954);
+}
+
+/* ===== SWAP DETAILS INFO ===== */
+.swap-details {
+  background: rgba(13, 43, 36, 0.6);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.detail-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.detail-value {
+  color: #39ff14;
+  font-weight: 600;
+}
+
+/* ===== GLASS HEADER ===== */
+.header {
+  background: linear-gradient(
+    180deg, 
+    rgba(13, 43, 36, 0.95) 0%, 
+    rgba(13, 43, 36, 0.75) 60%, 
+    rgba(13, 43, 36, 0) 100%
+  );
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 20px;
+}
+
+/* ===== CONNECT WALLET BUTTON ===== */
+.connect-wallet-btn {
+  background: linear-gradient(135deg, #39ff14, #1db954);
+  color: #00160f;
+  border: none;
+  border-radius: 24px;
+  padding: 10px 20px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(57, 255, 20, 0.3);
+}
+
+.connect-wallet-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(57, 255, 20, 0.4);
+}
+
+/* ===== MOBILE RESPONSIVE ===== */
+@media (max-width: 768px) {
+  .swap-container {
+    margin: 0 auto;
+    padding: 20px;
+    max-width: calc(100% - 1rem);
+    width: calc(100% - 1rem);
+    gap: 16px;
+  }
+  
+  .swap-btn {
+    height: 52px;
+    font-size: 15px;
+    margin-top: auto;
+  }
+  
+  .main {
+    padding: 0.5rem 0.5rem 2rem 0.5rem;
+  }
+  
+  .header {
+    padding: 10px 16px;
+  }
+  
+  .amount-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  .percentage-buttons {
+    gap: 6px;
+  }
+  
+  .percentage-btn {
+    height: 32px;
+    font-size: 12px;
+  }
+}
+
+/* ===== LOADING STATES ===== */
+.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid #39ff14;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ===== SUCCESS/ERROR STATES ===== */
+.success {
+  border-color: #39ff14 !important;
+  box-shadow: 0 0 0 3px rgba(57, 255, 20, 0.2);
+}
+
+.error {
+  border-color: #ff4757 !important;
+  box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.2);
+}
+
+/* ===== PREMIUM ANIMATIONS ===== */
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-up {
+  animation: slideUp 0.4s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== ACCESSIBILITY ===== */
+.swap-btn:focus,
+.amount-input:focus,
+.token-selector:focus {
+  outline: 2px solid #39ff14;
+  outline-offset: 2px;
+}
+
+/* ===== DARK THEME VARIABLES ===== */
+:root {
+  --primary-green: #39ff14;
+  --secondary-green: #1db954;
+  --dark-green: #0d2b24;
+  --glass-bg: rgba(18, 47, 40, 0.95);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --shadow-primary: rgba(0, 0, 0, 0.4);
+  --shadow-green: rgba(57, 255, 20, 0.25);
+}
