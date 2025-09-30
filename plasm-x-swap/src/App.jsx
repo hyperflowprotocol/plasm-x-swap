@@ -1681,7 +1681,7 @@ function App() {
           try {
             // For custom tokens, pass the address; for default tokens, pass the symbol
             const tokenIdentifier = token.address && token.address !== 'native' ? token.address : token.symbol;
-            const balance = await getTokenBalance(tokenIdentifier, account, provider)
+            const balance = await getTokenBalance(tokenIdentifier, currentAccount, provider)
             console.log(`${token.symbol} balance:`, balance)
             return { ...token, balance: parseFloat(balance).toFixed(4) }
           } catch (error) {
