@@ -829,28 +829,33 @@ app.post('/api/referrals/bind-code', async (req, res) => {
   }
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Plasm X Swap Backend running on port ${PORT}`);
-  console.log(`📊 Simple Token System - Symbols Only`);
-  console.log(`🎯 Available tokens: ${PLASMA_TOKENS.map(t => t.symbol).join(', ')}`);
-  
-  // Show fee configuration
-  const feeConfig = FEE_CONFIG.getSummary();
-  console.log(`\n💰 Fee Configuration:`);
-  console.log(`   Total DyorSwap Fee: ${feeConfig.totalFeePercent}%`);
-  console.log(`   Referral Split: ${feeConfig.referralSharePercent}% (${feeConfig.referrerPercentOfTrade}% of trade)`);
-  console.log(`   Platform Split: ${feeConfig.platformSharePercent}% (${feeConfig.platformPercentOfTrade}% of trade)`);
-  console.log(`   Example: 100 XPL trade → ${feeConfig.example.totalFee} fee → ${feeConfig.example.referrerEarns} referrer + ${feeConfig.example.platformKeeps} platform\n`);
-  
-  if (VAULT_CONFIG.vaultAddress && VAULT_CONFIG.signerPK) {
-    const wallet = new ethers.Wallet(VAULT_CONFIG.signerPK);
-    console.log(`💰 Referral Vault: ${VAULT_CONFIG.vaultAddress}`);
-    console.log(`🔐 Signer Address: ${wallet.address}`);
-  } else {
-    console.log(`⚠️  Referral Vault not configured (set VAULT_ADDRESS and SIGNER_PK)`);
-  }
-  
-  // Preload cache in background (after 10 seconds to avoid rate limiting)
-  setTimeout(() => preloadLaunchedTokens(), 10000);
-});
+// Start server only if not in Vercel serverless environment
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Plasm X Swap Backend running on port ${PORT}`);
+    console.log(`📊 Simple Token System - Symbols Only`);
+    console.log(`🎯 Available tokens: ${PLASMA_TOKENS.map(t => t.symbol).join(', ')}`);
+    
+    // Show fee configuration
+    const feeConfig = FEE_CONFIG.getSummary();
+    console.log(`\n💰 Fee Configuration:`);
+    console.log(`   Total DyorSwap Fee: ${feeConfig.totalFeePercent}%`);
+    console.log(`   Referral Split: ${feeConfig.referralSharePercent}% (${feeConfig.referrerPercentOfTrade}% of trade)`);
+    console.log(`   Platform Split: ${feeConfig.platformSharePercent}% (${feeConfig.platformPercentOfTrade}% of trade)`);
+    console.log(`   Example: 100 XPL trade → ${feeConfig.example.totalFee} fee → ${feeConfig.example.referrerEarns} referrer + ${feeConfig.example.platformKeeps} platform\n`);
+    
+    if (VAULT_CONFIG.vaultAddress && VAULT_CONFIG.signerPK) {
+      const wallet = new ethers.Wallet(VAULT_CONFIG.signerPK);
+      console.log(`💰 Referral Vault: ${VAULT_CONFIG.vaultAddress}`);
+      console.log(`🔐 Signer Address: ${wallet.address}`);
+    } else {
+      console.log(`⚠️  Referral Vault not configured (set VAULT_ADDRESS and SIGNER_PK)`);
+    }
+    
+    // Preload cache in background (after 10 seconds to avoid rate limiting)
+    setTimeout(() => preloadLaunchedTokens(), 10000);
+  });
+}
+
+// Export for Vercel serverless
+module.exports = app;
