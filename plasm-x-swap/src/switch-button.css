@@ -1,0 +1,52 @@
+/* Switch Button Styles */
+.switch-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 0;
+  top: -1.5rem;
+}
+
+.switch-btn {
+  background: transparent;
+  border: none;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 12px;
+}
+
+.switch-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.switch-btn:hover {
+  color: #e5e5e5;
+  transform: scale(1.1);
+}
+
+.switch-btn:active {
+  transform: scale(0.95);
+}
+
+@media (max-width: 768px) {
+  .switch-container {
+    top: -1.25rem;
+  }
+  
+  .switch-btn {
+    padding: 10px;
+  }
+  
+  .switch-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+}
