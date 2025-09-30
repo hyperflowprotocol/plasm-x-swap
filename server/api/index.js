@@ -1,0 +1,139 @@
+// Serverless API entry point for Vercel
+const express = require('express');
+const cors = require('cors');
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Simple tokens - no external calls
+const PLASMA_TOKENS = [
+  {
+    symbol: 'XPL',
+    name: 'Plasma',
+    address: 'native',
+    decimals: 18
+  },
+  {
+    symbol: 'WXPL',
+    name: 'Wrapped XPL',
+    address: '0x6100e367285b01f48d07953803a2d8dca5d19873',
+    decimals: 18
+  },
+  {
+    symbol: 'USDT0',
+    name: 'USDT0',
+    address: '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb',
+    decimals: 6
+  }
+];
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Plasm X Swap Backend API',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: [
+      '/api/tokens',
+      '/api/referral-stats/:address',
+      '/api/create-referral-code',
+      '/api/bind-by-code',
+      '/health'
+    ]
+  });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    environment: 'vercel-serverless',
+    database: !!process.env.DATABASE_URL,
+    vault: !!process.env.VAULT_ADDRESS
+  });
+});
+
+// Get tokens
+app.get('/api/tokens', (req, res) => {
+  res.json(PLASMA_TOKENS);
+});
+
+// Referral endpoints - lazy load db only when needed
+app.post('/api/create-referral-code', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { walletAddress, referralCode } = req.body;
+    
+    if (!walletAddress || !referralCode) {
+      return res.status(400).json({ error: 'Missing walletAddress or referralCode' });
+    }
+    
+    const result = await db.createReferralCode(walletAddress, referralCode);
+    res.json({ success: true, referralCode: result });
+  } catch (error) {
+    console.error('Error creating referral code:', error);
+    res.status(500).json({ error: error.message || 'Failed to create referral code' });
+  }
+});
+
+app.post('/api/bind-by-code', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { userAddress, referralCode } = req.body;
+    
+    if (!userAddress || !referralCode) {
+      return res.status(400).json({ error: 'Missing userAddress or referralCode' });
+    }
+    
+    const referralRecord = await db.getReferralCodeInfo(referralCode);
+    if (!referralRecord) {
+      return res.status(404).json({ error: 'Invalid referral code' });
+    }
+    
+    if (userAddress.toLowerCase() === referralRecord.wallet_address.toLowerCase()) {
+      return res.status(400).json({ error: 'Cannot refer yourself' });
+    }
+    
+    const binding = await db.bindReferrer(userAddress, referralRecord.wallet_address);
+    
+    if (binding) {
+      console.log(`✅ Bound user ${userAddress} to referrer via code ${referralCode}`);
+      res.json({ success: true, binding, referrer: referralRecord.wallet_address });
+    } else {
+      res.json({ success: true, message: 'Already bound to a referrer' });
+    }
+  } catch (error) {
+    console.error('Error binding by code:', error);
+    res.status(400).json({ error: error.message || 'Failed to bind referral' });
+  }
+});
+
+app.get('/api/referral-stats/:address', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { address } = req.params;
+    
+    const [code, referralCount, earnings] = await Promise.all([
+      db.getReferralCode(address),
+      db.getReferralCount(address),
+      db.getReferralEarnings(address)
+    ]);
+    
+    res.json({
+      walletAddress: address,
+      referralCode: code?.referral_code || null,
+      totalReferrals: referralCount,
+      totalEarnings: earnings || '0'
+    });
+  } catch (error) {
+    console.error('Error getting referral stats:', error);
+    res.status(500).json({ error: 'Failed to get referral stats' });
+  }
+});
+
+// Export for Vercel
+module.exports = app;
