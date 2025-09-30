@@ -1,6 +1,6 @@
 // Frontend API service for backend communication - Simplified (No Logos)
 
-const API_BASE = ''; // Use relative URLs for Replit environment
+const API_BASE = 'https://plasm-x-swap-backend.vercel.app'; // Production backend
 
 class ApiService {
   // Get all tokens (symbols only)
