@@ -760,15 +760,11 @@ function App() {
         })
         .catch(err => console.error('Failed to fetch earnings:', err));
       
-      fetch(`${window.location.origin}/api/referrals/my-code/${account}`)
+      fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
         .then(res => res.json())
         .then(data => {
-          if (data.success) {
-            if (data.code) {
-              setReferralCode(data.code);
-            }
-            setReferralCount(data.referralCount || 0);
-          }
+          setReferralCode(data.referralCode);
+          setReferralCount(data.totalReferrals || 0);
         })
         .catch(err => console.error('Failed to fetch referral code:', err));
     }
@@ -783,7 +779,7 @@ function App() {
       if (refCode) {
         console.log(`🎯 Detected referral code: ${refCode}`);
         
-        fetch(`${window.location.origin}/api/referrals/bind-code`, {
+        fetch(`https://plasm-x-swap-backend.vercel.app/api/bind-by-code`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -793,7 +789,7 @@ function App() {
         })
           .then(res => res.json())
           .then(data => {
-            if (data.success && data.binding) {
+            if (data.success) {
               console.log(`✅ Successfully bound to referrer via code ${refCode}`);
               showToast(`Welcome! You've been referred by ${refCode}`, 'success');
             }
@@ -2112,7 +2108,7 @@ function App() {
                             
                             setIsCreatingCode(true);
                             try {
-                              const response = await fetch(`${window.location.origin}/api/referrals/create-code`, {
+                              const response = await fetch(`https://plasm-x-swap-backend.vercel.app/api/create-referral-code`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
