@@ -408,7 +408,21 @@ app.get('/api/search-token/:address', async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.VERCEL ? 'vercel' : 'local',
+    database: !!process.env.DATABASE_URL
+  });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Plasm X Swap Backend API',
+    status: 'running',
+    endpoints: ['/api/tokens', '/api/launched-tokens', '/health']
+  });
 });
 
 // Preload launched tokens cache on startup (background)
