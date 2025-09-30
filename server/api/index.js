@@ -41,6 +41,7 @@ app.get('/', (req, res) => {
       '/api/referral-stats/:address',
       '/api/create-referral-code',
       '/api/bind-by-code',
+      '/api/track-swap',
       '/health'
     ]
   });
@@ -132,6 +133,62 @@ app.get('/api/referral-stats/:address', async (req, res) => {
   } catch (error) {
     console.error('Error getting referral stats:', error);
     res.status(500).json({ error: 'Failed to get referral stats' });
+  }
+});
+
+// Track swap and calculate referrer earnings
+app.post('/api/track-swap', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { txHash, userAddress, grossAmountWei } = req.body;
+    
+    if (!txHash || !userAddress || !grossAmountWei) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Calculate 2% platform fee
+    const platformFeeWei = (BigInt(grossAmountWei) * BigInt(2) / BigInt(100)).toString();
+    
+    // Check if user has a referrer
+    const referrerData = await db.getReferrer(userAddress);
+    
+    let referrerAddress = null;
+    let referrerCutWei = '0';
+    let platformCutWei = platformFeeWei;
+    
+    if (referrerData) {
+      referrerAddress = referrerData.referrer_address;
+      // 30% of platform fee goes to referrer
+      referrerCutWei = (BigInt(platformFeeWei) * BigInt(30) / BigInt(100)).toString();
+      // 70% stays with platform
+      platformCutWei = (BigInt(platformFeeWei) - BigInt(referrerCutWei)).toString();
+      
+      console.log(`💰 Swap tracked: User ${userAddress} via referrer ${referrerAddress}`);
+      console.log(`💵 Platform fee: ${platformFeeWei} wei (Referrer: ${referrerCutWei}, Platform: ${platformCutWei})`);
+    } else {
+      console.log(`💰 Swap tracked: User ${userAddress} (no referrer)`);
+      console.log(`💵 Platform fee: ${platformFeeWei} wei (100% to platform)`);
+    }
+    
+    // Log swap to database
+    const swapLog = await db.logSwap(
+      txHash,
+      userAddress,
+      referrerAddress,
+      grossAmountWei,
+      platformFeeWei,
+      platformCutWei,
+      referrerCutWei
+    );
+    
+    res.json({
+      success: true,
+      swap: swapLog,
+      referrerEarnings: referrerCutWei
+    });
+  } catch (error) {
+    console.error('Error tracking swap:', error);
+    res.status(500).json({ error: error.message || 'Failed to track swap' });
   }
 });
 

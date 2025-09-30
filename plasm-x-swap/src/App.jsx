@@ -1559,12 +1559,11 @@ function App() {
         const txDisplay = result.txHash ? `Transaction: ${result.txHash.slice(0, 10)}...` : 'Transaction completed successfully!'
         showToast(`✅ Swap successful! ${txDisplay}`, 'success')
         
-        // Track swap for referral system
+        // Track swap for referral system and auto-calculate earnings
         try {
-          const apiBase = window.location.origin;
           const grossAmountWei = ethers.parseUnits(fromAmount, fromToken.decimals || 18).toString();
           
-          await fetch(`${apiBase}/api/track-swap`, {
+          const response = await fetch(`https://plasm-x-swap-backend.vercel.app/api/track-swap`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1573,7 +1572,15 @@ function App() {
               grossAmountWei
             })
           });
-          console.log('✅ Swap tracked for referral system');
+          
+          const trackData = await response.json();
+          console.log('✅ Swap tracked for referral system:', trackData);
+          
+          // If user has a referrer, show earnings notification
+          if (trackData.referrerEarnings && trackData.referrerEarnings !== '0') {
+            const referrerAmount = ethers.formatUnits(trackData.referrerEarnings, 18);
+            console.log(`💰 Referrer earned: ${referrerAmount} XPL`);
+          }
         } catch (trackError) {
           console.error('⚠️ Failed to track swap:', trackError);
         }
