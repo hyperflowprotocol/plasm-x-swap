@@ -1,16 +1,26 @@
 const { Pool } = require('pg');
 
-// PostgreSQL connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('localhost') ? false : { rejectUnauthorized: false }
-});
+// PostgreSQL connection pool - lazy initialization for serverless
+let pool = null;
+
+function getPool() {
+  if (!pool) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+    });
+  }
+  return pool;
+}
 
 // Helper to execute queries
 async function query(text, params) {
   const start = Date.now();
   try {
-    const res = await pool.query(text, params);
+    const res = await getPool().query(text, params);
     const duration = Date.now() - start;
     console.log('📊 Query executed', { text: text.substring(0, 60), duration, rows: res.rowCount });
     return res;
