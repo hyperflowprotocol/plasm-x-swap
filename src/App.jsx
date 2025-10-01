@@ -19,7 +19,8 @@ import {
   getPlasmaProvider,
   wrapXPL,
   unwrapWXPL,
-  CONTRACT_ADDRESSES
+  CONTRACT_ADDRESSES,
+  fetchLaunchedTokensOnchain
 } from './contracts/contractUtils'
 import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
@@ -422,7 +423,7 @@ function App() {
     }, 4000);
   }
 
-  // Load launched tokens from backend API (REAL DATA from DyorSwap Pump)
+  // Load launched tokens DIRECTLY from blockchain (TRUE ONCHAIN - no backend needed!)
   const loadLaunchedTokens = async (silent = false) => {
     // INSTANT DISPLAY: Load from cache first!
     const cachedData = localStorage.getItem('launchedTokensCache');
@@ -448,26 +449,22 @@ function App() {
     }
     
     try {
-      console.log(silent ? '🔄 Background refresh...' : '🚀 Loading launched tokens...');
-      const response = await fetch(`${API_BASE}/api/launched-tokens`);
-      if (response.ok) {
-        const data = await response.json();
-        
-        // Sort tokens by bonding curve progress (highest first)
-        const sortedTokens = (data.tokens || []).sort((a, b) => {
-          return (b.bondingProgress || 0) - (a.bondingProgress || 0);
-        });
-        
-        // Save to cache
-        localStorage.setItem('launchedTokensCache', JSON.stringify(sortedTokens));
-        localStorage.setItem('launchedTokensCacheTime', now.toString());
-        
-        console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens`);
-        setLaunchedTokens(sortedTokens);
-      } else {
-        console.log('⚠️ Failed to fetch launched tokens');
-        if (!silent && !cachedData) setLaunchedTokens([]);
-      }
+      console.log(silent ? '🔄 Background refresh...' : '🚀 Loading launched tokens DIRECTLY from blockchain...');
+      
+      // DIRECT BLOCKCHAIN CALL - No backend needed!
+      const data = await fetchLaunchedTokensOnchain();
+      
+      // Sort tokens by bonding curve progress (highest first)
+      const sortedTokens = (data.tokens || []).sort((a, b) => {
+        return (b.bondingProgress || 0) - (a.bondingProgress || 0);
+      });
+      
+      // Save to cache
+      localStorage.setItem('launchedTokensCache', JSON.stringify(sortedTokens));
+      localStorage.setItem('launchedTokensCacheTime', now.toString());
+      
+      console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens from blockchain!`);
+      setLaunchedTokens(sortedTokens);
     } catch (error) {
       console.error('❌ Error loading launched tokens:', error);
       if (!silent && !cachedData) setLaunchedTokens([]);
