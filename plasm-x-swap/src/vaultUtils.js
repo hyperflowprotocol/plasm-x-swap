@@ -71,7 +71,7 @@ export async function getVoucher(apiBase, referrer, token, amountWei) {
  */
 export async function getVaultInfo(apiBase) {
   // Use backend API with detailed error logging
-  const base = 'https://3a9e0063-77a5-47c3-8b08-e9c97e127f0a-00-39uxnbmqdszny.picard.replit.dev';
+  const base = apiBase; // Use the passed apiBase parameter
   const url = `${base}/api/vault-info`;
   
   console.log('🌐 Fetching vault info from:', url);
