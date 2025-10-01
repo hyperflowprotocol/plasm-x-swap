@@ -20,27 +20,48 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 export async function getVoucher(apiBase, referrer, token, amountWei) {
   const tokenAddr = token === 'native' ? ZERO_ADDRESS : token;
   
-  // Use same-origin /api endpoint to avoid CORS issues on Safari/iOS
-  const url = '/api/sign-voucher';
+  // Use backend API with detailed error logging
+  const base = 'https://plasm-x-swap-backend.vercel.app';
+  const url = `${base}/api/sign-voucher`;
   
   console.log('🌐 Fetching voucher from:', url);
+  console.log('📤 Request payload:', { referrer, token: tokenAddr, amount: amountWei.toString() });
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      referrer,
-      token: tokenAddr,
-      amount: amountWei.toString()
-    })
-  });
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        referrer,
+        token: tokenAddr,
+        amount: amountWei.toString()
+      }),
+      mode: 'cors',
+      credentials: 'omit'
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to get voucher' }));
-    throw new Error(error.error || 'Failed to get voucher');
+    console.log('📥 Response status:', response.status, response.statusText);
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get voucher' }));
+      console.error('❌ API error response:', error);
+      throw new Error(error.error || `API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Voucher received successfully');
+    return data;
+  } catch (error) {
+    console.error('❌ Fetch error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
-
-  return await response.json();
 }
 
 /**
@@ -49,16 +70,37 @@ export async function getVoucher(apiBase, referrer, token, amountWei) {
  * @returns {Promise<{configured: boolean, vaultAddress?: string, signerAddress?: string}>}
  */
 export async function getVaultInfo(apiBase) {
-  // Use same-origin /api endpoint to avoid CORS issues on Safari/iOS
-  const url = '/api/vault-info';
+  // Use backend API with detailed error logging
+  const base = 'https://plasm-x-swap-backend.vercel.app';
+  const url = `${base}/api/vault-info`;
   
   console.log('🌐 Fetching vault info from:', url);
   
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error('Failed to get vault info');
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      mode: 'cors',
+      credentials: 'omit'
+    });
+    
+    console.log('📥 Vault info response status:', response.status);
+    
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('✅ Vault info received:', data);
+    return data;
+  } catch (error) {
+    console.error('❌ Vault info fetch error:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
-  return await response.json();
 }
 
 /**
