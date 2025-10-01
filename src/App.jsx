@@ -519,9 +519,12 @@ function App() {
   // URL routing - sync URL with showLaunchPage state
   useEffect(() => {
     const path = window.location.pathname;
-    if (path === '/launch' && !showLaunchPage) {
+    if (path === '/launch') {
+      console.log('🚀 Detected /launch path - loading tokens immediately');
       setShowLaunchPage(true);
-    } else if (path !== '/launch' && showLaunchPage) {
+      // Load tokens immediately if on /launch path
+      loadLaunchedTokens();
+    } else if (showLaunchPage) {
       setShowLaunchPage(false);
     }
   }, []);
@@ -694,24 +697,29 @@ function App() {
         return;
       }
       
-      console.log('⚠️ No valid wallet in localStorage, clearing connection');
+      console.log('⚠️ No valid wallet in localStorage');
       
-      // Only clear connection if there's no direct MetaMask connection
-      const hasDirectWallet = window.ethereum && window.ethereum.selectedAddress
-      if (!hasDirectWallet) {
-        console.log('❌ Privy wallet disconnected')
-        setAccount('')
-        setIsConnected(false)
-        setNetwork(null)
-      } else {
-        console.log('🔗 Keeping direct wallet connection despite Privy disconnect')
+      // Only clear connection if there's no direct MetaMask connection AND no active Privy session
+      const hasDirectWallet = window.ethereum && window.ethereum.selectedAddress;
+      const hasPrivyConnection = wallets && wallets.length > 0;
+      
+      if (!hasDirectWallet && !hasPrivyConnection) {
+        console.log('❌ No wallet connection found - clearing state');
+        setAccount('');
+        setIsConnected(false);
+        setNetwork(null);
+      } else if (hasDirectWallet) {
+        console.log('🔗 Keeping direct wallet connection despite Privy disconnect');
         // Force update connection state for direct wallet
         if (window.ethereum.selectedAddress && !isConnected) {
-          console.log('🔄 Restoring direct wallet connection:', window.ethereum.selectedAddress)
-          setAccount(window.ethereum.selectedAddress)
-          setIsConnected(true)
-          setTimeout(() => updateBalances(), 500)
+          console.log('🔄 Restoring direct wallet connection:', window.ethereum.selectedAddress);
+          setAccount(window.ethereum.selectedAddress);
+          setIsConnected(true);
+          setTimeout(() => updateBalances(), 500);
         }
+      } else if (hasPrivyConnection) {
+        console.log('🔗 Keeping Privy WalletConnect connection');
+        // Keep the connection from Privy WalletConnect
       }
     }
   }, [ready, authenticated, wallets])
