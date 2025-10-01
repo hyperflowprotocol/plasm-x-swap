@@ -449,10 +449,12 @@ function App() {
     }
     
     try {
-      console.log(silent ? '🔄 Background refresh...' : '🚀 Loading launched tokens DIRECTLY from blockchain...');
+      console.log(silent ? '🔄 Background refresh...' : '🚀 Loading launched tokens from backend...');
       
-      // DIRECT BLOCKCHAIN CALL - No backend needed!
-      const data = await fetchLaunchedTokensOnchain();
+      // BACKEND API CALL - Fast and reliable!
+      const response = await fetch(`${API_BASE}/api/launched-tokens`);
+      if (!response.ok) throw new Error('Failed to fetch');
+      const data = await response.json();
       
       // Sort tokens by bonding curve progress (highest first)
       const sortedTokens = (data.tokens || []).sort((a, b) => {
@@ -463,10 +465,10 @@ function App() {
       localStorage.setItem('launchedTokensCache', JSON.stringify(sortedTokens));
       localStorage.setItem('launchedTokensCacheTime', now.toString());
       
-      console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens from blockchain!`);
+      console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens from backend!`);
       setLaunchedTokens(sortedTokens);
     } catch (error) {
-      console.error('❌ Error loading launched tokens from blockchain:', error);
+      console.error('❌ Error loading launched tokens:', error);
       if (!silent && !cachedData) setLaunchedTokens([]);
     } finally {
       if (!silent) {
