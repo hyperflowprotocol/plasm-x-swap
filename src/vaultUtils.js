@@ -20,8 +20,8 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 export async function getVoucher(apiBase, referrer, token, amountWei) {
   const tokenAddr = token === 'native' ? ZERO_ADDRESS : token;
   
-  const base = apiBase && apiBase.startsWith('http') ? apiBase : 'https://plasm-x-swap-backend.vercel.app';
-  const url = `${base}/api/sign-voucher`;
+  // Use same-origin /api endpoint to avoid CORS issues on Safari/iOS
+  const url = '/api/sign-voucher';
   
   console.log('🌐 Fetching voucher from:', url);
   
@@ -49,8 +49,8 @@ export async function getVoucher(apiBase, referrer, token, amountWei) {
  * @returns {Promise<{configured: boolean, vaultAddress?: string, signerAddress?: string}>}
  */
 export async function getVaultInfo(apiBase) {
-  const base = apiBase && apiBase.startsWith('http') ? apiBase : 'https://plasm-x-swap-backend.vercel.app';
-  const url = `${base}/api/vault-info`;
+  // Use same-origin /api endpoint to avoid CORS issues on Safari/iOS
+  const url = '/api/vault-info';
   
   console.log('🌐 Fetching vault info from:', url);
   
