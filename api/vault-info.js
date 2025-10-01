@@ -1,4 +1,4 @@
-const { ethers } = require('ethers');
+import { ethers } from 'ethers';
 
 const VAULT_CONFIG = {
   signerPK: process.env.SIGNER_PK || process.env.DEPLOYER_PRIVATE_KEY || null,
