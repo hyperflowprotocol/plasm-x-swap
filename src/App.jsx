@@ -2347,6 +2347,11 @@ function App() {
                       console.error('❌ CLAIM FAILED AT:', error.message);
                       console.error('❌ Full error:', error);
                       console.error('❌ Error stack:', error.stack);
+                      
+                      // Show detailed error in alert for debugging on mobile
+                      const debugInfo = `Error: ${error.message}\nName: ${error.name}\nType: ${error.constructor.name}`;
+                      alert('CLAIM ERROR DEBUG:\n' + debugInfo);
+                      
                       const errorMsg = formatClaimError(error);
                       showToast(errorMsg, 'error');
                     } finally {
