@@ -29,5 +29,6 @@
     "vite": "^7.1.7"
   },
   "_deploy_timestamp": "2025-10-01T14:50:24.575Z",
-  "_deploy_trigger": "2025-10-01T15:01:21.482Z"
+  "_deploy_trigger": "2025-10-01T15:01:21.482Z",
+  "_deploy_fix": "Fix backend URL trailing slash 2025-10-01T15:06:22.184Z"
 }
