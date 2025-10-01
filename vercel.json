@@ -1,18 +1,19 @@
 {
-  "buildCommand": "cd plasm-x-swap && npm install && npm run build",
-  "outputDirectory": "plasm-x-swap/dist",
-  "installCommand": "cd plasm-x-swap && npm install",
-  "framework": "vite",
   "functions": {
     "api/**/*.js": {
-      "memory": 1024,
-      "maxDuration": 10
+      "runtime": "@vercel/node@3.0.7",
+      "maxDuration": 30
     }
   },
-  "rewrites": [
+  "headers": [
     {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.privy.io https://*.privy.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://auth.privy.io https://*.privy.io https://rpc.plasma.to https://explorer.plasma.to https://plasm-x-swap-backend.vercel.app wss://*.privy.io; frame-src https://auth.privy.io https://*.privy.io; child-src https://auth.privy.io https://*.privy.io; frame-ancestors 'self';"
+        }
+      ]
     }
   ]
 }
