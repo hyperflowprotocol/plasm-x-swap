@@ -385,7 +385,7 @@ function App() {
     }
     try {
       console.log(silent ? '🔄 Refreshing launched tokens...' : '🚀 Loading REAL launched tokens from DyorSwap Pump...');
-      const response = await fetch('/api/launched-tokens');
+      const response = await fetch(`${API_BASE}/api/launched-tokens`);
       if (response.ok) {
         const data = await response.json();
         console.log(silent ? '✅ Tokens refreshed' : '✅ Launched tokens loaded:', data);
@@ -980,6 +980,13 @@ function App() {
   // Clean wallet connection
   const connectWallet = async () => {
     try {
+      if (!ready) {
+        console.log('⏳ Privy not ready yet...')
+        showToast('Please wait, loading...', 'info')
+        return
+      }
+      
+      console.log('🚀 Calling Privy login()...')
       await login()
       
       // Force balance update after Privy connection
@@ -989,26 +996,8 @@ function App() {
       }, 2000);
       
     } catch (error) {
-      console.error('Wallet connection failed:', error)
-      
-      // Fallback to direct wallet connection
-      if (window.ethereum) {
-        try {
-          await connectDirectWallet()
-          
-          // Force balance update after direct connection
-          setTimeout(() => {
-            console.log('🔄 Force updating balances after direct connect...');
-            updateBalances();
-          }, 2000);
-          
-        } catch (directError) {
-          console.error('Direct connection also failed:', directError)
-          showToast('Unable to connect. Please refresh the page and try again.', 'error')
-        }
-      } else {
-        showToast('Please install MetaMask or another Web3 wallet to continue.', 'warning')
-      }
+      console.error('❌ Wallet connection failed:', error)
+      showToast('Unable to connect wallet. Please try again.', 'error')
     }
   }
 
