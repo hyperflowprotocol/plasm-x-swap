@@ -1,6 +1,7 @@
 // Serverless API entry point for Vercel
 const express = require('express');
 const cors = require('cors');
+const { ethers } = require('ethers');
 
 const app = express();
 
