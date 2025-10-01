@@ -423,7 +423,7 @@ function App() {
     }, 4000);
   }
 
-  // Load launched tokens DIRECTLY from blockchain (TRUE ONCHAIN - no backend needed!)
+  // Load launched tokens from backend API (REAL DATA from DyorSwap Pump)
   const loadLaunchedTokens = async (silent = false) => {
     // INSTANT DISPLAY: Load from cache first!
     const cachedData = localStorage.getItem('launchedTokensCache');
@@ -466,7 +466,7 @@ function App() {
       console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens from blockchain!`);
       setLaunchedTokens(sortedTokens);
     } catch (error) {
-      console.error('❌ Error loading launched tokens:', error);
+      console.error('❌ Error loading launched tokens from blockchain:', error);
       if (!silent && !cachedData) setLaunchedTokens([]);
     } finally {
       if (!silent) {
