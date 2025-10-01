@@ -1,27 +1,52 @@
-// Serverless API entry point for Vercel - v1.0.1
+// Serverless API entry point for Vercel - v2.0 (timeout-safe)
 const express = require('express');
 const cors = require('cors');
 const { ethers } = require('ethers');
 
 const app = express();
 
-// Explicit CORS for Safari/iOS preflight
-// Use FRONTEND_ORIGIN env var for production, or allow all for development
-const corsOptions = {
-  origin: process.env.FRONTEND_ORIGIN || true,
+// Timeout helper for database and RPC calls
+const withTimeout = (promise, ms, label = 'operation') =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    )
+  ]);
+
+// Safari-safe CORS allowlist
+const allowlist = new Set([
+  'https://plasm-x.exchange',
+  'https://www.plasm-x.exchange',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+]);
+
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true); // server-to-server or curl
+    return cb(null, allowlist.has(origin));
+  },
+  credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: false,
-  maxAge: 600
-};
+  allowedHeaders: ['content-type', 'authorization']
+}));
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-
-// No-cache for API responses (prevents stale preflight on iOS)
-app.use((_, res, next) => {
-  res.setHeader('Cache-Control', 'no-store');
+// Reflect origin for Safari
+app.use((req, res, next) => {
+  const o = req.headers.origin;
+  if (o && allowlist.has(o)) {
+    res.setHeader('access-control-allow-origin', o);
+    res.setHeader('vary', 'origin');
+    res.setHeader('access-control-allow-credentials', 'true');
+  }
+  res.setHeader('cache-control', 'no-store');
   next();
+});
+
+// Fast preflight handler (no DB hits)
+app.options('*', (_req, res) => {
+  return res.status(204).end();
 });
 
 app.use(express.json());
@@ -71,10 +96,12 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
+// Health check - instant, no DB/RPC
+app.get(['/health', '/api/health'], (_req, res) => {
+  return res.json({ 
+    ok: true,
     status: 'healthy', 
+    ts: Date.now(),
     timestamp: new Date().toISOString(),
     environment: 'vercel-serverless',
     database: !!process.env.DATABASE_URL,
@@ -87,37 +114,37 @@ app.get('/api/migrate', async (req, res) => {
   try {
     const db = require('../db');
     
-    // Add missing columns to swap_logs table
-    await db.query(`
+    // Add missing columns to swap_logs table with timeout
+    await withTimeout(db.query(`
       ALTER TABLE swap_logs 
         ADD COLUMN IF NOT EXISTS platform_fee_wei VARCHAR(78) DEFAULT '0',
         ADD COLUMN IF NOT EXISTS platform_cut_wei VARCHAR(78) DEFAULT '0',
         ADD COLUMN IF NOT EXISTS referrer_cut_wei VARCHAR(78) DEFAULT '0'
-    `);
+    `), 5000, 'ALTER TABLE swap_logs');
     
     // Drop old conflicting columns
-    await db.query(`
+    await withTimeout(db.query(`
       ALTER TABLE swap_logs 
         DROP COLUMN IF EXISTS fee_amount_wei,
         DROP COLUMN IF EXISTS swapped_at
-    `);
+    `), 5000, 'DROP COLUMNS');
     
     // Create voucher nonces table for claim functionality
-    await db.query(`
+    await withTimeout(db.query(`
       CREATE TABLE IF NOT EXISTS voucher_nonces (
         referrer_address VARCHAR(42) PRIMARY KEY,
         current_nonce BIGINT NOT NULL DEFAULT 0,
         last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `), 5000, 'CREATE TABLE voucher_nonces');
     
     // Verify columns exist
-    const result = await db.query(`
+    const result = await withTimeout(db.query(`
       SELECT column_name 
       FROM information_schema.columns 
       WHERE table_name = 'swap_logs' 
       ORDER BY ordinal_position
-    `);
+    `), 3000, 'VERIFY COLUMNS');
     
     const columns = result.rows.map(r => r.column_name);
     
@@ -151,11 +178,15 @@ app.post('/api/create-referral-code', async (req, res) => {
       return res.status(400).json({ error: 'Missing walletAddress or referralCode' });
     }
     
-    const result = await db.createReferralCode(walletAddress, referralCode);
-    res.json({ success: true, referralCode: result });
+    const result = await withTimeout(
+      db.createReferralCode(walletAddress, referralCode),
+      4000,
+      'createReferralCode'
+    );
+    return res.json({ success: true, referralCode: result });
   } catch (error) {
     console.error('Error creating referral code:', error);
-    res.status(500).json({ error: error.message || 'Failed to create referral code' });
+    return res.status(500).json({ error: error.message || 'Failed to create referral code' });
   }
 });
 
@@ -168,7 +199,11 @@ app.post('/api/bind-by-code', async (req, res) => {
       return res.status(400).json({ error: 'Missing userAddress or referralCode' });
     }
     
-    const referralRecord = await db.getReferralCodeInfo(referralCode);
+    const referralRecord = await withTimeout(
+      db.getReferralCodeInfo(referralCode),
+      3000,
+      'getReferralCodeInfo'
+    );
     if (!referralRecord) {
       return res.status(404).json({ error: 'Invalid referral code' });
     }
@@ -177,17 +212,21 @@ app.post('/api/bind-by-code', async (req, res) => {
       return res.status(400).json({ error: 'Cannot refer yourself' });
     }
     
-    const binding = await db.bindReferrer(userAddress, referralRecord.wallet_address);
+    const binding = await withTimeout(
+      db.bindReferrer(userAddress, referralRecord.wallet_address),
+      4000,
+      'bindReferrer'
+    );
     
     if (binding) {
       console.log(`✅ Bound user ${userAddress} to referrer via code ${referralCode}`);
-      res.json({ success: true, binding, referrer: referralRecord.wallet_address });
+      return res.json({ success: true, binding, referrer: referralRecord.wallet_address });
     } else {
-      res.json({ success: true, message: 'Already bound to a referrer' });
+      return res.json({ success: true, message: 'Already bound to a referrer' });
     }
   } catch (error) {
     console.error('Error binding by code:', error);
-    res.status(400).json({ error: error.message || 'Failed to bind referral' });
+    return res.status(400).json({ error: error.message || 'Failed to bind referral' });
   }
 });
 
@@ -196,13 +235,17 @@ app.get('/api/referral-stats/:address', async (req, res) => {
     const db = require('../db');
     const { address } = req.params;
     
-    const [code, referralCount, earnings] = await Promise.all([
-      db.getReferralCode(address),
-      db.getReferralCount(address),
-      db.getReferralEarnings(address)
-    ]);
+    const [code, referralCount, earnings] = await withTimeout(
+      Promise.all([
+        db.getReferralCode(address),
+        db.getReferralCount(address),
+        db.getReferralEarnings(address)
+      ]),
+      5000,
+      'getReferralStats'
+    );
     
-    res.json({
+    return res.json({
       walletAddress: address,
       referralCode: code?.referral_code || null,
       totalReferrals: referralCount,
@@ -210,7 +253,7 @@ app.get('/api/referral-stats/:address', async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting referral stats:', error);
-    res.status(500).json({ error: 'Failed to get referral stats' });
+    return res.status(500).json({ error: 'Failed to get referral stats' });
   }
 });
 
@@ -413,7 +456,11 @@ app.post('/api/sign-voucher', async (req, res) => {
 
     // Check database balance for native token claims
     if (tokenAddr === '0x0000000000000000000000000000000000000000') {
-      const summary = await db.getReferrerSummary(referrer);
+      const summary = await withTimeout(
+        db.getReferrerSummary(referrer),
+        4000,
+        'getReferrerSummary'
+      );
       const payable = BigInt(summary.payable_wei);
       const requested = BigInt(amount);
       
@@ -426,12 +473,20 @@ app.post('/api/sign-voucher', async (req, res) => {
       }
       
       // Update claimed amount in database
-      await db.updateClaimedAmount(referrer, amount);
+      await withTimeout(
+        db.updateClaimedAmount(referrer, amount),
+        4000,
+        'updateClaimedAmount'
+      );
       console.log(`✅ Updated claimed amount for ${referrer}: ${ethers.formatEther(amount)} XPL`);
     }
 
     // Get next nonce from database (atomic)
-    const nonce = await db.getNextNonce(referrer);
+    const nonce = await withTimeout(
+      db.getNextNonce(referrer),
+      3000,
+      'getNextNonce'
+    );
     
     // Calculate deadline
     const now = Math.floor(Date.now() / 1000);
