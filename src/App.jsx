@@ -21,7 +21,7 @@ import {
   unwrapWXPL,
   CONTRACT_ADDRESSES
 } from './contracts/contractUtils'
-import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils'
+import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
 // Popular tokens on Plasma chain - SUPPORTS ALL TOKENS
 const DEFAULT_TOKENS = [

@@ -250,28 +250,10 @@ app.post('/api/track-swap', async (req, res) => {
 
 // ============ VOUCHER SIGNING ENDPOINTS ============
 
-// Vault configuration with sanitization (Vercel sometimes includes var name in value)
-function sanitizeVaultAddress() {
-  const raw = (process.env.VAULT_ADDRESS || '').toString();
-  const cleaned = raw.includes('=') ? raw.split('=').pop() : raw;
-  const trimmed = cleaned.trim().replace(/^"|"$/g, '');
-  
-  if (!trimmed) {
-    return '0xB21486D9499a2cD8CE3e638E4077327affd8F24f';
-  }
-  
-  try {
-    return ethers.getAddress(trimmed);
-  } catch (e) {
-    console.error('Invalid VAULT_ADDRESS format:', raw);
-    return null;
-  }
-}
-
 const VAULT_CONFIG = {
-  signerPK: process.env.SIGNER_PK || process.env.DEPLOYER_PRIVATE_KEY || null,
-  vaultAddress: sanitizeVaultAddress(),
-  chainId: process.env.CHAIN_ID || '9745'
+  signerPK: (process.env.SIGNER_PK || process.env.DEPLOYER_PRIVATE_KEY || '').trim(),
+  vaultAddress: (process.env.VAULT_ADDRESS || '0xB21486D9499a2cD8CE3e638E4077327affd8F24f').trim(),
+  chainId: (process.env.CHAIN_ID || '9745').trim()
 };
 
 // EIP-712 domain (must match ReferralVault.sol)
