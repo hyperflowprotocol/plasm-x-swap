@@ -1,4 +1,4 @@
-// Serverless API entry point for Vercel
+// Serverless API entry point for Vercel - v1.0.1
 const express = require('express');
 const cors = require('cors');
 const { ethers } = require('ethers');
@@ -486,5 +486,6 @@ app.get('/api/vault-info', (req, res) => {
   });
 });
 
-// Export for Vercel
-module.exports = app;
+// Export for Vercel - wrap with serverless-http
+const serverless = require('serverless-http');
+module.exports = serverless(app);
