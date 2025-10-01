@@ -78,6 +78,15 @@ app.get('/api/migrate', async (req, res) => {
         DROP COLUMN IF EXISTS swapped_at
     `);
     
+    // Create voucher nonces table for claim functionality
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS voucher_nonces (
+        referrer_address VARCHAR(42) PRIMARY KEY,
+        current_nonce BIGINT NOT NULL DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
     // Verify columns exist
     const result = await db.query(`
       SELECT column_name 
@@ -90,8 +99,8 @@ app.get('/api/migrate', async (req, res) => {
     
     res.json({ 
       success: true, 
-      message: 'Database migration completed successfully! Old columns removed.',
-      columns: columns,
+      message: 'Database migration completed! Schema updated + voucher_nonces table created.',
+      swap_logs_columns: columns,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
