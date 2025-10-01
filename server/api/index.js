@@ -5,8 +5,24 @@ const { ethers } = require('ethers');
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// Explicit CORS for Safari/iOS preflight
+const corsOptions = {
+  origin: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false,
+  maxAge: 600
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// No-cache for API responses (prevents stale preflight on iOS)
+app.use((_, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 app.use(express.json());
 
 // Simple tokens - no external calls
