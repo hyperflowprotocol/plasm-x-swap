@@ -545,7 +545,13 @@ function App() {
     if (showLaunchPage && currentPath !== '/launch') {
       window.history.pushState({}, '', '/launch');
     } else if (!showLaunchPage && currentPath === '/launch') {
-      window.history.pushState({}, '', '/');
+      // User navigated to /launch directly, set state to match
+      setShowLaunchPage(true);
+    } else if (!showLaunchPage && currentPath !== '/launch') {
+      // Only push to / if we're not already there
+      if (currentPath !== '/') {
+        window.history.pushState({}, '', '/');
+      }
     }
   }, [showLaunchPage]);
 
