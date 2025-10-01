@@ -43,6 +43,9 @@ app.get('/', (req, res) => {
       '/api/create-referral-code',
       '/api/bind-by-code',
       '/api/track-swap',
+      '/api/sign-voucher',
+      '/api/vault-info',
+      '/api/migrate',
       '/health'
     ]
   });
@@ -285,8 +288,14 @@ app.post('/api/sign-voucher', async (req, res) => {
 
     const { referrer, token, amount, deadline } = req.body || {};
 
-    // Validate referrer address
-    if (!referrer || !ethers.isAddress(referrer)) {
+    // Validate referrer address (ethers v6 compatible)
+    if (!referrer) {
+      return res.status(400).json({ error: 'Missing referrer address' });
+    }
+    
+    try {
+      ethers.getAddress(referrer); // Throws if invalid
+    } catch (e) {
       return res.status(400).json({ error: 'Invalid referrer address' });
     }
     
@@ -295,8 +304,12 @@ app.post('/api/sign-voucher', async (req, res) => {
       ? '0x0000000000000000000000000000000000000000' 
       : token;
       
-    if (tokenAddr !== '0x0000000000000000000000000000000000000000' && !ethers.isAddress(tokenAddr)) {
-      return res.status(400).json({ error: 'Invalid token address' });
+    if (tokenAddr !== '0x0000000000000000000000000000000000000000') {
+      try {
+        ethers.getAddress(tokenAddr); // Throws if invalid
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid token address' });
+      }
     }
     
     // Validate amount (must be integer wei string)
