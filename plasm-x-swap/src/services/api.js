@@ -1,6 +1,6 @@
 // Frontend API service for backend communication - Simplified (No Logos)
 
-const API_BASE = 'https://plasm-x-swap-backend.vercel.app'; // Production backend
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://3a9e0063-77a5-47c3-8b08-e9c97e127f0a-00-39uxnbmqdszny.picard.replit.dev'; // Use env var or fallback to Replit
 
 class ApiService {
   // Get all tokens (symbols only)

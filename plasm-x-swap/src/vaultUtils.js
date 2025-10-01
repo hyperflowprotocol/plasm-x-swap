@@ -20,22 +20,48 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 export async function getVoucher(apiBase, referrer, token, amountWei) {
   const tokenAddr = token === 'native' ? ZERO_ADDRESS : token;
   
-  const response = await fetch(`${apiBase}/api/sign-voucher`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      referrer,
-      token: tokenAddr,
-      amount: amountWei
-    })
-  });
+  // Use backend API with detailed error logging
+  const base = apiBase; // Use the passed apiBase parameter
+  const url = `${base}/api/sign-voucher`;
+  
+  console.log('🌐 Fetching voucher from:', url);
+  console.log('📤 Request payload:', { referrer, token: tokenAddr, amount: amountWei.toString() });
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        referrer,
+        token: tokenAddr,
+        amount: amountWei.toString()
+      }),
+      mode: 'cors',
+      credentials: 'omit'
+    });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to get voucher');
+    console.log('📥 Response status:', response.status, response.statusText);
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to get voucher' }));
+      console.error('❌ API error response:', error);
+      throw new Error(error.error || `API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Voucher received successfully');
+    return data;
+  } catch (error) {
+    console.error('❌ Fetch error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
-
-  return await response.json();
 }
 
 /**
@@ -44,11 +70,37 @@ export async function getVoucher(apiBase, referrer, token, amountWei) {
  * @returns {Promise<{configured: boolean, vaultAddress?: string, signerAddress?: string}>}
  */
 export async function getVaultInfo(apiBase) {
-  const response = await fetch(`${apiBase}/api/vault-info`);
-  if (!response.ok) {
-    throw new Error('Failed to get vault info');
+  // Use backend API with detailed error logging
+  const base = 'https://3a9e0063-77a5-47c3-8b08-e9c97e127f0a-00-39uxnbmqdszny.picard.replit.dev';
+  const url = `${base}/api/vault-info`;
+  
+  console.log('🌐 Fetching vault info from:', url);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      mode: 'cors',
+      credentials: 'omit'
+    });
+    
+    console.log('📥 Vault info response status:', response.status);
+    
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('✅ Vault info received:', data);
+    return data;
+  } catch (error) {
+    console.error('❌ Vault info fetch error:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
   }
-  return await response.json();
 }
 
 /**
@@ -57,36 +109,48 @@ export async function getVaultInfo(apiBase) {
  * @param {string} vaultAddress - ReferralVault contract address
  * @param {string} token - Token address ('native' for XPL or ERC20 address)
  * @param {string} amountWei - Amount in wei
- * @param {object} signer - Ethers signer (from wallet)
- * @returns {Promise<object>} - Transaction receipt
+ * @param {object} provider - Raw Ethereum provider from Privy
+ * @param {string} userAddress - User's wallet address
+ * @returns {Promise<object>} - Transaction hash
  */
-export async function claimReferralFee(apiBase, vaultAddress, token, amountWei, signer) {
+export async function claimReferralFee(apiBase, vaultAddress, token, amountWei, provider, userAddress) {
   try {
-    const referrer = await signer.getAddress();
-    console.log(`🎯 Claiming ${ethers.formatEther(amountWei)} fees for ${referrer}`);
+    console.log(`🎯 Claiming ${ethers.formatEther(amountWei)} XPL fees for ${userAddress}`);
 
     // Get signed voucher from backend
-    const voucher = await getVoucher(apiBase, referrer, token, amountWei);
+    console.log('📡 Requesting voucher from backend...');
+    const voucher = await getVoucher(apiBase, userAddress, token, amountWei);
     console.log('✅ Voucher received:', voucher);
 
-    // Call vault.claim() with voucher
-    const vault = new ethers.Contract(vaultAddress, VAULT_ABI, signer);
-    
+    // Encode claim() function call manually
     const tokenAddr = token === 'native' ? ZERO_ADDRESS : token;
     
-    const tx = await vault.claim(
+    // claim(address token, uint256 amount, uint256 nonce, uint256 deadline, bytes signature)
+    const iface = new ethers.Interface(VAULT_ABI);
+    const data = iface.encodeFunctionData('claim', [
       tokenAddr,
       amountWei,
       voucher.nonce,
       voucher.deadline,
       voucher.signature
-    );
+    ]);
+    
+    console.log('📦 Encoded transaction data:', data.substring(0, 66) + '...');
+    
+    // Send transaction directly via provider (Privy-compatible)
+    console.log('📤 Sending transaction via Privy provider...');
+    const txHash = await provider.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: userAddress,
+        to: vaultAddress,
+        data: data,
+        value: '0x0'
+      }]
+    });
 
-    console.log('📤 Claim transaction sent:', tx.hash);
-    const receipt = await tx.wait();
-    console.log('✅ Claim successful!', receipt);
-
-    return receipt;
+    console.log('✅ Transaction sent! Hash:', txHash);
+    return { hash: txHash };
   } catch (error) {
     console.error('❌ Claim failed:', error);
     throw error;

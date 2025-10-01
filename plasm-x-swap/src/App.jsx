@@ -23,6 +23,9 @@ import {
 } from './contracts/contractUtils'
 import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
+// API Base URL - uses environment variable or fallback
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://3a9e0063-77a5-47c3-8b08-e9c97e127f0a-00-39uxnbmqdszny.picard.replit.dev';
+
 // Popular tokens on Plasma chain - SUPPORTS ALL TOKENS
 const DEFAULT_TOKENS = [
   { 
@@ -750,33 +753,56 @@ function App() {
 
   // Fetch referral code on wallet connection (auto-load on page load)
   useEffect(() => {
-    if (isConnected && account) {
-      fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
+    const walletAddress = account || wallets?.[0]?.address;
+    if (walletAddress) {
+      console.log('🔄 Loading referral code for:', walletAddress);
+      fetch(`${API_BASE}/api/referrals/my-code/${walletAddress}`)
         .then(res => res.json())
         .then(data => {
-          setReferralCode(data.referralCode);
-          setReferralCount(data.totalReferrals || 0);
+          if (data.referralCode) {
+            console.log('✅ Loaded existing referral code:', data.referralCode);
+            setReferralCode(data.referralCode);
+            setReferralCount(data.totalReferrals || 0);
+          } else {
+            console.log('ℹ️ No referral code found for this wallet');
+          }
         })
         .catch(err => console.error('Failed to fetch referral code:', err));
     }
-  }, [isConnected, account])
+  }, [isConnected, account, wallets])
 
   // Fetch referral earnings when claim modal opens
   useEffect(() => {
-    if (showClaimModal && isConnected && account) {
-      fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
+    const walletAddress = account || wallets?.[0]?.address;
+    if (showClaimModal && walletAddress) {
+      console.log('🔄 Modal opened - Force loading referral data for:', walletAddress);
+      fetch(`${API_BASE}/api/referrals/my-code/${walletAddress}`)
         .then(res => res.json())
         .then(data => {
+          console.log('📊 Modal fetch response:', data);
+          
+          // Set referral code if exists
+          if (data.code || data.referralCode) {
+            const code = data.code || data.referralCode;
+            console.log('✅ Setting referral code from modal fetch:', code);
+            setReferralCode(code);
+            setReferralCount(data.referralCount || data.totalReferrals || 0);
+          }
+          
           // Always set earnings (even if zero) so UI shows the 3 boxes
+          const totalEarned = data.totalEarnings || '0';
+          const totalClaimed = data.totalClaimed || '0';
+          const payable = (BigInt(totalEarned) - BigInt(totalClaimed)).toString();
+          
           setReferralEarnings({
-            totalEarned: data.totalEarnings || '0',
-            totalClaimed: '0', // TODO: Track claimed amounts
-            payable: data.totalEarnings || '0' // For now, all earnings are available
+            totalEarned: totalEarned,
+            totalClaimed: totalClaimed,
+            payable: payable
           });
         })
         .catch(err => console.error('Failed to fetch referral stats:', err));
     }
-  }, [showClaimModal, isConnected, account])
+  }, [showClaimModal, isConnected, account, wallets])
 
   // Auto-bind referral on page load
   useEffect(() => {
@@ -787,7 +813,7 @@ function App() {
       if (refCode) {
         console.log(`🎯 Detected referral code: ${refCode}`);
         
-        fetch(`https://plasm-x-swap-backend.vercel.app/api/bind-by-code`, {
+        fetch(`${API_BASE}/api/referrals/bind-code`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1573,7 +1599,7 @@ function App() {
         try {
           const grossAmountWei = ethers.parseUnits(fromAmount, fromToken.decimals || 18).toString();
           
-          const response = await fetch(`https://plasm-x-swap-backend.vercel.app/api/track-swap`, {
+          const response = await fetch(`${API_BASE}/api/track-swap`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2123,7 +2149,7 @@ function App() {
                             
                             setIsCreatingCode(true);
                             try {
-                              const response = await fetch(`https://plasm-x-swap-backend.vercel.app/api/create-referral-code`, {
+                              const response = await fetch(`${API_BASE}/api/referrals/create-code`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -2325,11 +2351,10 @@ function App() {
                     setIsClaiming(true);
                     try {
                       // Get vault info
-                      const apiBase = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
-                      console.log('🌐 Using API:', apiBase);
+                      console.log('🌐 Using API:', API_BASE);
                       
                       console.log('🔄 Step 1: Fetching vault info...');
-                      const vaultInfo = await getVaultInfo(apiBase);
+                      const vaultInfo = await getVaultInfo(API_BASE);
                       console.log('✅ Step 1 SUCCESS - Vault info:', vaultInfo);
                       
                       if (!vaultInfo.configured) {
@@ -2337,19 +2362,38 @@ function App() {
                         return;
                       }
                       
-                      console.log('🔄 Step 2: Getting wallet signer...');
-                      // Get ethers signer from Privy wallet
-                      const provider = new ethers.BrowserProvider(window.ethereum);
-                      const signer = await provider.getSigner();
-                      const signerAddr = await signer.getAddress();
-                      console.log('✅ Step 2 SUCCESS - Signer address:', signerAddr);
+                      console.log('🔄 Step 2: Getting Privy wallet provider...');
+                      // Get raw provider from Privy wallet (NOT wrapped in BrowserProvider)
+                      const connectedWallet = wallets?.[0];
+                      if (!connectedWallet) {
+                        throw new Error('No wallet connected');
+                      }
+                      
+                      const walletProvider = await connectedWallet.getEthereumProvider();
+                      console.log('✅ Step 2 SUCCESS - Got Privy provider for:', account);
                       
                       console.log('🔄 Step 3: Claiming fees...');
-                      // Claim fees
+                      // Claim fees using raw provider (Privy-compatible)
                       const amountWei = ethers.parseEther(claimAmount);
                       console.log('💰 Amount in wei:', amountWei.toString());
-                      await claimReferralFee(apiBase, vaultInfo.vaultAddress, 'native', amountWei.toString(), signer);
+                      await claimReferralFee(API_BASE, vaultInfo.vaultAddress, 'native', amountWei.toString(), walletProvider, account);
                       console.log('✅ Step 3 SUCCESS - Claim completed!');
+                      
+                      // Reload referral data to update display
+                      console.log('🔄 Refreshing referral data...');
+                      const response = await fetch(`${API_BASE}/api/referrals/my-code/${account}`);
+                      const data = await response.json();
+                      
+                      const totalEarned = data.totalEarnings || '0';
+                      const totalClaimed = data.totalClaimed || '0';
+                      const payable = (BigInt(totalEarned) - BigInt(totalClaimed)).toString();
+                      
+                      setReferralEarnings({
+                        totalEarned: totalEarned,
+                        totalClaimed: totalClaimed,
+                        payable: payable
+                      });
+                      console.log('✅ Refreshed! New available:', ethers.formatEther(payable), 'XPL');
                       
                       showToast(`Successfully claimed ${claimAmount} XPL!`, 'success');
                       setClaimAmount('');

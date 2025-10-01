@@ -6,8 +6,9 @@ const { ethers } = require('ethers');
 const app = express();
 
 // Explicit CORS for Safari/iOS preflight
+// Use FRONTEND_ORIGIN env var for production, or allow all for development
 const corsOptions = {
-  origin: true,
+  origin: process.env.FRONTEND_ORIGIN || true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
   credentials: false,
