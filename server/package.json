@@ -1,6 +1,6 @@
 {
   "name": "plasm-x-swap-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Backend API for Plasm X Swap DEX Aggregator",
   "main": "index.js",
   "scripts": {
