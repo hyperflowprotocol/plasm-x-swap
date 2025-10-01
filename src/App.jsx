@@ -539,19 +539,13 @@ function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Update URL when showLaunchPage changes
+  // Update URL when showLaunchPage changes (only push history, don't read)
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (showLaunchPage && currentPath !== '/launch') {
       window.history.pushState({}, '', '/launch');
-    } else if (!showLaunchPage && currentPath === '/launch') {
-      // User navigated to /launch directly, set state to match
-      setShowLaunchPage(true);
-    } else if (!showLaunchPage && currentPath !== '/launch') {
-      // Only push to / if we're not already there
-      if (currentPath !== '/') {
-        window.history.pushState({}, '', '/');
-      }
+    } else if (!showLaunchPage && currentPath !== '/') {
+      window.history.pushState({}, '', '/');
     }
   }, [showLaunchPage]);
 
