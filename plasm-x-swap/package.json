@@ -28,5 +28,6 @@
     "globals": "^16.4.0",
     "vite": "^7.1.7"
   },
-  "_deploy_timestamp": "2025-10-01T14:50:24.575Z"
+  "_deploy_timestamp": "2025-10-01T14:50:24.575Z",
+  "_deploy_trigger": "2025-10-01T15:01:21.482Z"
 }
