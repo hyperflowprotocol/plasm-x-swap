@@ -235,5 +235,139 @@ app.post('/api/track-swap', async (req, res) => {
   }
 });
 
+// ============ VOUCHER SIGNING ENDPOINTS ============
+
+// Vault configuration
+const VAULT_CONFIG = {
+  signerPK: process.env.SIGNER_PK || process.env.DEPLOYER_PRIVATE_KEY || null,
+  vaultAddress: process.env.VAULT_ADDRESS || '0xB6973bA89e9d898aD28F922399067c1E9D46f77B',
+  chainId: process.env.CHAIN_ID || '9745'
+};
+
+// EIP-712 domain (must match ReferralVault.sol)
+const getVaultDomain = () => ({
+  name: 'ReferralVault',
+  version: '1',
+  chainId: Number(VAULT_CONFIG.chainId),
+  verifyingContract: VAULT_CONFIG.vaultAddress
+});
+
+const vaultTypes = {
+  Payout: [
+    { name: 'referrer', type: 'address' },
+    { name: 'token', type: 'address' },
+    { name: 'amount', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' }
+  ]
+};
+
+// POST /api/sign-voucher - Sign a referral payout voucher
+app.post('/api/sign-voucher', async (req, res) => {
+  try {
+    const db = require('../db');
+    
+    if (!VAULT_CONFIG.signerPK || !VAULT_CONFIG.vaultAddress) {
+      return res.status(503).json({ 
+        error: 'Vault not configured. Set SIGNER_PK/DEPLOYER_PRIVATE_KEY and VAULT_ADDRESS env vars.' 
+      });
+    }
+
+    const { referrer, token, amount, deadline } = req.body || {};
+
+    // Validate referrer address
+    if (!referrer || !ethers.isAddress(referrer)) {
+      return res.status(400).json({ error: 'Invalid referrer address' });
+    }
+    
+    // Normalize token address
+    const tokenAddr = token === 'native' || token === '0x0000000000000000000000000000000000000000' 
+      ? '0x0000000000000000000000000000000000000000' 
+      : token;
+      
+    if (tokenAddr !== '0x0000000000000000000000000000000000000000' && !ethers.isAddress(tokenAddr)) {
+      return res.status(400).json({ error: 'Invalid token address' });
+    }
+    
+    // Validate amount (must be integer wei string)
+    if (!amount || !/^[0-9]+$/.test(amount) || BigInt(amount) <= 0n) {
+      return res.status(400).json({ error: 'Invalid amount. Must be positive integer wei string.' });
+    }
+
+    // Check database balance for native token claims
+    if (tokenAddr === '0x0000000000000000000000000000000000000000') {
+      const summary = await db.getReferrerSummary(referrer);
+      const payable = BigInt(summary.payable_wei);
+      const requested = BigInt(amount);
+      
+      if (requested > payable) {
+        return res.status(400).json({ 
+          error: 'Insufficient balance',
+          payable: payable.toString(),
+          requested: requested.toString()
+        });
+      }
+      
+      // Update claimed amount in database
+      await db.updateClaimedAmount(referrer, amount);
+      console.log(`✅ Updated claimed amount for ${referrer}: ${ethers.formatEther(amount)} XPL`);
+    }
+
+    // Get next nonce from database (atomic)
+    const nonce = await db.getNextNonce(referrer);
+    
+    // Calculate deadline
+    const now = Math.floor(Date.now() / 1000);
+    const dl = deadline ? Number(deadline) : (now + 3600); // 1 hour default
+
+    // Create voucher value
+    const value = {
+      referrer: referrer,
+      token: tokenAddr,
+      amount: amount.toString(),
+      nonce: nonce.toString(),
+      deadline: dl
+    };
+
+    // Sign the voucher
+    const wallet = new ethers.Wallet(VAULT_CONFIG.signerPK);
+    const signature = await wallet.signTypedData(getVaultDomain(), vaultTypes, value);
+
+    console.log(`✅ Signed voucher for ${referrer}: ${ethers.formatEther(amount)} tokens (nonce: ${nonce})`);
+
+    return res.json({
+      signature,
+      nonce: nonce.toString(),
+      deadline: dl,
+      referrer,
+      token: tokenAddr,
+      amount: amount.toString()
+    });
+  } catch (error) {
+    console.error('❌ Error signing voucher:', error);
+    return res.status(500).json({ error: 'Failed to sign voucher: ' + error.message });
+  }
+});
+
+// GET /api/vault-info - Get vault configuration info
+app.get('/api/vault-info', (req, res) => {
+  if (!VAULT_CONFIG.vaultAddress) {
+    return res.json({ 
+      configured: false, 
+      message: 'Vault not configured. Set VAULT_ADDRESS env var.' 
+    });
+  }
+
+  const wallet = VAULT_CONFIG.signerPK ? new ethers.Wallet(VAULT_CONFIG.signerPK) : null;
+  
+  res.json({
+    configured: true,
+    vaultAddress: VAULT_CONFIG.vaultAddress,
+    chainId: VAULT_CONFIG.chainId,
+    signerAddress: wallet ? wallet.address : 'Not set',
+    domain: getVaultDomain()
+  });
+});
+
 // Export for Vercel
 module.exports = app;

@@ -209,6 +209,21 @@ async function getReferralEarnings(walletAddress) {
   return result.rows[0]?.total_earned_wei || '0';
 }
 
+// Get next nonce for voucher signing (atomic increment)
+async function getNextNonce(referrerAddress) {
+  const text = `
+    INSERT INTO voucher_nonces (referrer_address, current_nonce)
+    VALUES ($1, 1)
+    ON CONFLICT (referrer_address) 
+    DO UPDATE SET 
+      current_nonce = voucher_nonces.current_nonce + 1,
+      last_updated = CURRENT_TIMESTAMP
+    RETURNING current_nonce
+  `;
+  const result = await query(text, [referrerAddress.toLowerCase()]);
+  return result.rows[0].current_nonce.toString();
+}
+
 module.exports = {
   query,
   bindReferrer,
@@ -223,5 +238,6 @@ module.exports = {
   getReferralCodeInfo: getWalletFromCode, // Alias
   bindReferrerByCode,
   getReferralCount,
-  getReferralEarnings
+  getReferralEarnings,
+  getNextNonce
 };
