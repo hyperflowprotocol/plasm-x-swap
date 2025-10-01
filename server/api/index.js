@@ -58,6 +58,44 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Database migration endpoint - run once to update schema
+app.get('/api/migrate', async (req, res) => {
+  try {
+    const db = require('../db');
+    
+    // Add missing columns to swap_logs table
+    await db.query(`
+      ALTER TABLE swap_logs 
+        ADD COLUMN IF NOT EXISTS platform_fee_wei VARCHAR(78) DEFAULT '0',
+        ADD COLUMN IF NOT EXISTS platform_cut_wei VARCHAR(78) DEFAULT '0',
+        ADD COLUMN IF NOT EXISTS referrer_cut_wei VARCHAR(78) DEFAULT '0'
+    `);
+    
+    // Verify columns exist
+    const result = await db.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'swap_logs' 
+      ORDER BY ordinal_position
+    `);
+    
+    const columns = result.rows.map(r => r.column_name);
+    
+    res.json({ 
+      success: true, 
+      message: 'Database migration completed successfully!',
+      columns: columns,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Get tokens
 app.get('/api/tokens', (req, res) => {
   res.json(PLASMA_TOKENS);
