@@ -3,9 +3,15 @@
   "outputDirectory": "plasm-x-swap/dist",
   "installCommand": "cd plasm-x-swap && npm install",
   "framework": "vite",
+  "functions": {
+    "api/**/*.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  },
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
