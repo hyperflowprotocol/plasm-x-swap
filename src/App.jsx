@@ -253,7 +253,7 @@ function App() {
   const [showSlippageSettings, setShowSlippageSettings] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showComingSoon, setShowComingSoon] = useState(false)
-  const [showLaunchPage, setShowLaunchPage] = useState(false)
+  const [showLaunchPage, setShowLaunchPage] = useState(window.location.pathname === '/launch')
   const [launchedTokens, setLaunchedTokens] = useState([])
   const [loadingLaunched, setLoadingLaunched] = useState(false)
   // Toast state removed - now using direct DOM manipulation
