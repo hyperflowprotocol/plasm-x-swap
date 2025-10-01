@@ -71,6 +71,13 @@ app.get('/api/migrate', async (req, res) => {
         ADD COLUMN IF NOT EXISTS referrer_cut_wei VARCHAR(78) DEFAULT '0'
     `);
     
+    // Drop old conflicting columns
+    await db.query(`
+      ALTER TABLE swap_logs 
+        DROP COLUMN IF EXISTS fee_amount_wei,
+        DROP COLUMN IF EXISTS swapped_at
+    `);
+    
     // Verify columns exist
     const result = await db.query(`
       SELECT column_name 
@@ -83,7 +90,7 @@ app.get('/api/migrate', async (req, res) => {
     
     res.json({ 
       success: true, 
-      message: 'Database migration completed successfully!',
+      message: 'Database migration completed successfully! Old columns removed.',
       columns: columns,
       timestamp: new Date().toISOString()
     });
