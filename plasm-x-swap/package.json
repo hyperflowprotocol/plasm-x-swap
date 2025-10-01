@@ -27,5 +27,6 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.4.0",
     "vite": "^7.1.7"
-  }
+  },
+  "_deploy_timestamp": "2025-10-01T14:50:24.575Z"
 }
