@@ -20,18 +20,23 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 export async function getVoucher(apiBase, referrer, token, amountWei) {
   const tokenAddr = token === 'native' ? ZERO_ADDRESS : token;
   
-  const response = await fetch(`${apiBase}/api/sign-voucher`, {
+  const base = apiBase && apiBase.startsWith('http') ? apiBase : 'https://plasm-x-swap-backend.vercel.app';
+  const url = `${base}/api/sign-voucher`;
+  
+  console.log('🌐 Fetching voucher from:', url);
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       referrer,
       token: tokenAddr,
-      amount: amountWei
+      amount: amountWei.toString()
     })
   });
 
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json().catch(() => ({ error: 'Failed to get voucher' }));
     throw new Error(error.error || 'Failed to get voucher');
   }
 
@@ -44,7 +49,12 @@ export async function getVoucher(apiBase, referrer, token, amountWei) {
  * @returns {Promise<{configured: boolean, vaultAddress?: string, signerAddress?: string}>}
  */
 export async function getVaultInfo(apiBase) {
-  const response = await fetch(`${apiBase}/api/vault-info`);
+  const base = apiBase && apiBase.startsWith('http') ? apiBase : 'https://plasm-x-swap-backend.vercel.app';
+  const url = `${base}/api/vault-info`;
+  
+  console.log('🌐 Fetching vault info from:', url);
+  
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error('Failed to get vault info');
   }
