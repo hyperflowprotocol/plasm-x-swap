@@ -59,6 +59,9 @@ app.get('/', (req, res) => {
       '/api/referral-stats/:address',
       '/api/create-referral-code',
       '/api/bind-by-code',
+      '/api/referrals/create-code',
+      '/api/referrals/bind-code',
+      '/api/referrals/my-code/:address',
       '/api/track-swap',
       '/api/sign-voucher',
       '/api/vault-info',
@@ -189,6 +192,81 @@ app.post('/api/bind-by-code', async (req, res) => {
 });
 
 app.get('/api/referral-stats/:address', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { address } = req.params;
+    
+    const [code, referralCount, earnings] = await Promise.all([
+      db.getReferralCode(address),
+      db.getReferralCount(address),
+      db.getReferralEarnings(address)
+    ]);
+    
+    res.json({
+      walletAddress: address,
+      referralCode: code?.referral_code || null,
+      totalReferrals: referralCount,
+      totalEarnings: earnings || '0'
+    });
+  } catch (error) {
+    console.error('Error getting referral stats:', error);
+    res.status(500).json({ error: 'Failed to get referral stats' });
+  }
+});
+
+// ============ FRONTEND-COMPATIBLE ALIAS ROUTES ============
+// These match the paths that the frontend expects
+
+app.post('/api/referrals/create-code', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { walletAddress, referralCode } = req.body;
+    
+    if (!walletAddress || !referralCode) {
+      return res.status(400).json({ error: 'Missing walletAddress or referralCode' });
+    }
+    
+    const result = await db.createReferralCode(walletAddress, referralCode);
+    res.json({ success: true, referralCode: result });
+  } catch (error) {
+    console.error('Error creating referral code:', error);
+    res.status(500).json({ error: error.message || 'Failed to create referral code' });
+  }
+});
+
+app.post('/api/referrals/bind-code', async (req, res) => {
+  try {
+    const db = require('../db');
+    const { userAddress, referralCode } = req.body;
+    
+    if (!userAddress || !referralCode) {
+      return res.status(400).json({ error: 'Missing userAddress or referralCode' });
+    }
+    
+    const referralRecord = await db.getReferralCodeInfo(referralCode);
+    if (!referralRecord) {
+      return res.status(404).json({ error: 'Invalid referral code' });
+    }
+    
+    if (userAddress.toLowerCase() === referralRecord.wallet_address.toLowerCase()) {
+      return res.status(400).json({ error: 'Cannot refer yourself' });
+    }
+    
+    const binding = await db.bindReferrer(userAddress, referralRecord.wallet_address);
+    
+    if (binding) {
+      console.log(`✅ Bound user ${userAddress} to referrer via code ${referralCode}`);
+      res.json({ success: true, binding, referrer: referralRecord.wallet_address });
+    } else {
+      res.json({ success: true, message: 'Already bound to a referrer' });
+    }
+  } catch (error) {
+    console.error('Error binding by code:', error);
+    res.status(400).json({ error: error.message || 'Failed to bind referral' });
+  }
+});
+
+app.get('/api/referrals/my-code/:address', async (req, res) => {
   try {
     const db = require('../db');
     const { address } = req.params;
