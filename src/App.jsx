@@ -23,6 +23,10 @@ import {
 } from './contracts/contractUtils'
 import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
+// API Base URL - Use VITE_BACKEND_URL or fallback to relative URL (same host)
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+console.log('🌐 API_BASE configured:', API_BASE || '(relative URL - same host)');
+
 // Popular tokens on Plasma chain - SUPPORTS ALL TOKENS
 const DEFAULT_TOKENS = [
   { 
@@ -81,19 +85,48 @@ function App() {
         return;
       }
       
-      const provider = getPlasmaProvider();
-      const tokenInfo = await getTokenInfo(tokenAddress, provider);
+      // First try to get full token data from backend (includes logo, bonding data for DyorSwap Pump tokens)
+      let newToken = null;
+      try {
+        console.log('🌐 Fetching token data from backend...');
+        const response = await fetch(`${API_BASE}/api/search-token/${tokenAddress}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.token) {
+            console.log('✅ Found token in backend:', data.token.symbol);
+            newToken = {
+              symbol: data.token.symbol,
+              name: data.token.name,
+              address: tokenAddress,
+              decimals: 18, // Default for DyorSwap Pump tokens
+              balance: '0.0',
+              logo: data.token.logo, // Include logo from backend
+              isCustom: true
+            };
+          }
+        }
+      } catch (e) {
+        console.log('⚠️ Backend search failed, falling back to blockchain query');
+      }
       
-      if (tokenInfo) {
-        const newToken = {
-          symbol: tokenInfo.symbol,
-          name: tokenInfo.name,
-          address: tokenAddress,
-          decimals: tokenInfo.decimals,
-          balance: '0.0',
-          isCustom: true
-        };
+      // Fallback: Query blockchain directly if backend didn't return data
+      if (!newToken) {
+        const provider = getPlasmaProvider();
+        const tokenInfo = await getTokenInfo(tokenAddress, provider);
         
+        if (tokenInfo) {
+          newToken = {
+            symbol: tokenInfo.symbol,
+            name: tokenInfo.name,
+            address: tokenAddress,
+            decimals: tokenInfo.decimals,
+            balance: '0.0',
+            isCustom: true
+          };
+        }
+      }
+      
+      if (newToken) {
         setTokens(prev => [...prev, newToken]);
         
         // Save to localStorage
@@ -101,10 +134,11 @@ function App() {
         customTokens.push(newToken);
         localStorage.setItem('customTokens', JSON.stringify(customTokens));
         
-        console.log(`✅ Added custom token: ${tokenInfo.symbol}`);
+        console.log(`✅ Added custom token: ${newToken.symbol}`);
         
         // Update balance if connected
         if (account) {
+          const provider = getPlasmaProvider();
           const balance = await getTokenBalance(tokenAddress, account, provider);
           updateTokenBalance(tokenAddress, balance);
         }
@@ -132,6 +166,14 @@ function App() {
         
         if (backendTokens && backendTokens.length > 0) {
           console.log(`✅ Loaded ${backendTokens.length} tokens from backend`);
+          
+          // Clear all logo cache to force reload of new logos
+          try {
+            localStorage.removeItem('logoCache');
+            console.log('🗑️ Cleared logo cache to reload new logos');
+          } catch (e) {
+            // Ignore cache clear errors
+          }
           
           // Add balance field to tokens
           const tokensWithBalance = backendTokens.map(token => ({
@@ -217,14 +259,14 @@ function App() {
   const walletDropdownRef = useRef(null)
   const slippageDropdownRef = useRef(null)
 
-  // Multiple IPFS gateways for fallback reliability
+  // Multiple IPFS gateways for fallback reliability (ordered by speed/reliability)
   const IPFS_GATEWAYS = [
-    'https://ipfs.tech/ipfs/',
-    'https://cyan-bright-dormouse-440.mypinata.cloud/ipfs/',
-    'https://gateway.pinata.cloud/ipfs/',
     'https://ipfs.io/ipfs/',
+    'https://cloudflare-ipfs.com/ipfs/',
+    'https://gateway.pinata.cloud/ipfs/',
     'https://dweb.link/ipfs/',
-    'https://cloudflare-ipfs.com/ipfs/'
+    'https://ipfs.tech/ipfs/',
+    'https://4everland.io/ipfs/'
   ];
 
   // Track logo loading state in localStorage for stability
@@ -305,10 +347,16 @@ function App() {
       return cached; // Use cached successful URL
     }
     
-    // Extract IPFS hash
+    // Extract logo
     const logo = token.logo || token.logoURI || '';
     if (!logo) return null;
     
+    // If it's a data URI or direct HTTP(S) URL, return it directly
+    if (logo.startsWith('data:') || logo.startsWith('http://') || logo.startsWith('https://')) {
+      return logo;
+    }
+    
+    // Extract IPFS hash
     const ipfsHash = logo.includes('ipfs://') 
       ? logo.replace('ipfs://', '')
       : logo.includes('/ipfs/') 
@@ -376,30 +424,53 @@ function App() {
 
   // Load launched tokens from backend API (REAL DATA from DyorSwap Pump)
   const loadLaunchedTokens = async (silent = false) => {
+    // INSTANT DISPLAY: Load from cache first!
+    const cachedData = localStorage.getItem('launchedTokensCache');
+    const cacheTimestamp = localStorage.getItem('launchedTokensCacheTime');
+    const now = Date.now();
+    const CACHE_MAX_AGE = 60000; // 1 minute
+    
+    if (cachedData && cacheTimestamp) {
+      const age = now - parseInt(cacheTimestamp);
+      if (age < CACHE_MAX_AGE) {
+        // Display cached data immediately
+        const cached = JSON.parse(cachedData);
+        console.log(`⚡ INSTANT display from cache (${Math.round(age/1000)}s old, ${cached.length} tokens)`);
+        setLaunchedTokens(cached);
+        setLoadingLaunched(false); // Hide spinner immediately
+        // Continue to fetch fresh data in background
+        silent = true;
+      }
+    }
+    
     if (!silent) {
       setLoadingLaunched(true);
     }
+    
     try {
-      console.log(silent ? '🔄 Refreshing launched tokens...' : '🚀 Loading REAL launched tokens from DyorSwap Pump...');
-      const response = await fetch('/api/launched-tokens');
+      console.log(silent ? '🔄 Background refresh...' : '🚀 Loading launched tokens...');
+      const response = await fetch(`${API_BASE}/api/launched-tokens`);
       if (response.ok) {
         const data = await response.json();
-        console.log(silent ? '✅ Tokens refreshed' : '✅ Launched tokens loaded:', data);
         
         // Sort tokens by bonding curve progress (highest first)
         const sortedTokens = (data.tokens || []).sort((a, b) => {
           return (b.bondingProgress || 0) - (a.bondingProgress || 0);
         });
         
-        console.log('📊 Sorted tokens by bonding curve progress');
+        // Save to cache
+        localStorage.setItem('launchedTokensCache', JSON.stringify(sortedTokens));
+        localStorage.setItem('launchedTokensCacheTime', now.toString());
+        
+        console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens`);
         setLaunchedTokens(sortedTokens);
       } else {
         console.log('⚠️ Failed to fetch launched tokens');
-        if (!silent) setLaunchedTokens([]);
+        if (!silent && !cachedData) setLaunchedTokens([]);
       }
     } catch (error) {
       console.error('❌ Error loading launched tokens:', error);
-      if (!silent) setLaunchedTokens([]);
+      if (!silent && !cachedData) setLaunchedTokens([]);
     } finally {
       if (!silent) {
         setLoadingLaunched(false);
@@ -416,7 +487,7 @@ function App() {
     
     try {
       console.log('🔍 Searching for token by address:', address);
-      const response = await fetch(`/api/search-token/${address}`);
+      const response = await fetch(`${API_BASE}/api/search-token/${address}`);
       if (response.ok) {
         const data = await response.json();
         console.log('✅ Found token:', data.token);
@@ -564,11 +635,18 @@ function App() {
 
   // Effect to sync Privy authentication state
   useEffect(() => {
+    console.log('🔐 Privy state:', { ready, authenticated, walletsCount: wallets.length });
+    
     if (ready && authenticated && wallets.length > 0) {
       // User is authenticated via Privy and has connected wallets
       const connectedWallet = wallets[0] // Use first wallet
       if (connectedWallet.address) {
         console.log('✅ Privy wallet detected:', connectedWallet.address)
+        
+        // Save to localStorage for persistence across reloads
+        localStorage.setItem('wallet_address', connectedWallet.address);
+        localStorage.setItem('wallet_connected', 'true');
+        
         setAccount(connectedWallet.address)
         setIsConnected(true)
         
@@ -596,6 +674,31 @@ function App() {
         setTimeout(() => updateBalances(), 1000)
       }
     } else if (ready && !authenticated) {
+      console.log('🔍 Checking localStorage for wallet...');
+      
+      // Check localStorage for persisted wallet connection
+      const savedAddress = localStorage.getItem('wallet_address');
+      const wasConnected = localStorage.getItem('wallet_connected');
+      
+      console.log('📦 localStorage check:', { 
+        savedAddress: savedAddress ? `${savedAddress.slice(0,6)}...` : null, 
+        wasConnected,
+        hasValue: !!savedAddress && wasConnected === 'true'
+      });
+      
+      if (savedAddress && wasConnected === 'true') {
+        console.log('✅ Restored wallet from localStorage:', savedAddress);
+        setAccount(savedAddress);
+        setIsConnected(true);
+        setNetwork({ chainId: 9745, name: 'Plasma Network' });
+        
+        // Trigger balance update
+        setTimeout(() => updateBalances(), 1000);
+        return;
+      }
+      
+      console.log('⚠️ No valid wallet in localStorage, clearing connection');
+      
       // Only clear connection if there's no direct MetaMask connection
       const hasDirectWallet = window.ethereum && window.ethereum.selectedAddress
       if (!hasDirectWallet) {
@@ -616,6 +719,27 @@ function App() {
     }
   }, [ready, authenticated, wallets])
 
+  // Update balances when tokens load and wallet is connected
+  useEffect(() => {
+    console.log('🔍 Balance update check:', { 
+      tokensCount: tokens.length, 
+      hasAccount: !!account, 
+      isConnected,
+      account: account ? `${account.slice(0,6)}...` : 'none'
+    });
+    
+    if (tokens.length > 0 && account && isConnected) {
+      console.log('💰 Tokens loaded with connected wallet - updating balances');
+      setTimeout(() => updateBalances(), 500);
+    } else {
+      console.log('⏸️ Balance update skipped - waiting for:', {
+        needsTokens: tokens.length === 0,
+        needsAccount: !account,
+        needsConnection: !isConnected
+      });
+    }
+  }, [tokens.length, account, isConnected]);
+
   // Handle body scroll lock for modal
   useEffect(() => {
     if (showTokenModal) {
@@ -634,17 +758,24 @@ function App() {
   useEffect(() => {
     // Check for existing wallet connection on page load
     const checkWalletConnection = async () => {
+      console.log('🔍 Checking for existing wallet connection...');
+      console.log('window.ethereum available:', !!window.ethereum);
+      
       if (window.ethereum) {
         try {
+          console.log('📡 Requesting eth_accounts...');
           const accounts = await window.ethereum.request({
             method: 'eth_accounts'
           })
+          
+          console.log('📡 eth_accounts response:', accounts);
           
           if (accounts && accounts.length > 0) {
             console.log('✅ Existing wallet connection found:', accounts[0])
             
             // Always update connection state if wallet is detected
             if (!isConnected || account !== accounts[0]) {
+              console.log('🔄 Updating connection state...');
               setAccount(accounts[0])
               setIsConnected(true)
             }
@@ -652,20 +783,26 @@ function App() {
             // Check current network
             try {
               const chainId = await window.ethereum.request({ method: 'eth_chainId' })
+              console.log('🌐 Current chainId:', chainId);
               if (chainId === '0x2611') {
                 setNetwork({ chainId: 9745, name: 'Plasma Network' })
               } else {
                 setNetwork({ chainId: parseInt(chainId, 16), name: 'Other Network' })
               }
             } catch (e) {
-              console.log('Network check failed:', e.message)
+              console.log('⚠️ Network check failed:', e.message)
             }
             
+            console.log('💰 Triggering balance update...');
             setTimeout(() => updateBalances(), 1000)
+          } else {
+            console.log('⚠️ No accounts found in eth_accounts response');
           }
         } catch (error) {
-          console.log('No existing wallet connection')
+          console.log('❌ eth_accounts error:', error.message || error)
         }
+      } else {
+        console.log('❌ window.ethereum not available');
       }
     }
 
@@ -748,24 +885,58 @@ function App() {
     return cleanup
   }, [ready, authenticated, user, wallets, account])
 
-  // Fetch referral earnings and custom code when claim modal opens
+  // Fetch referral code on wallet connection (auto-load on page load)
   useEffect(() => {
-    if (showClaimModal && isConnected && account) {
-      fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
+    const walletAddress = account || wallets?.[0]?.address;
+    if (walletAddress) {
+      console.log('🔄 Loading referral code for:', walletAddress);
+      fetch(`${API_BASE}/api/referrals/my-code/${walletAddress}`)
         .then(res => res.json())
         .then(data => {
-          setReferralCode(data.referralCode);
-          setReferralCount(data.totalReferrals || 0);
+          if (data.referralCode) {
+            console.log('✅ Loaded existing referral code:', data.referralCode);
+            setReferralCode(data.referralCode);
+            setReferralCount(data.totalReferrals || 0);
+          } else {
+            console.log('ℹ️ No referral code found for this wallet');
+          }
+        })
+        .catch(err => console.error('Failed to fetch referral code:', err));
+    }
+  }, [isConnected, account, wallets])
+
+  // Fetch referral earnings when claim modal opens
+  useEffect(() => {
+    const walletAddress = account || wallets?.[0]?.address;
+    if (showClaimModal && walletAddress) {
+      console.log('🔄 Modal opened - Force loading referral data for:', walletAddress);
+      fetch(`${API_BASE}/api/referrals/my-code/${walletAddress}`)
+        .then(res => res.json())
+        .then(data => {
+          console.log('📊 Modal fetch response:', data);
+          
+          // Set referral code if exists
+          if (data.code || data.referralCode) {
+            const code = data.code || data.referralCode;
+            console.log('✅ Setting referral code from modal fetch:', code);
+            setReferralCode(code);
+            setReferralCount(data.referralCount || data.totalReferrals || 0);
+          }
+          
           // Always set earnings (even if zero) so UI shows the 3 boxes
+          const totalEarned = data.totalEarnings || '0';
+          const totalClaimed = data.totalClaimed || '0';
+          const payable = (BigInt(totalEarned) - BigInt(totalClaimed)).toString();
+          
           setReferralEarnings({
-            totalEarned: data.totalEarnings || '0',
-            totalClaimed: '0', // TODO: Track claimed amounts
-            payable: data.totalEarnings || '0' // For now, all earnings are available
+            totalEarned: totalEarned,
+            totalClaimed: totalClaimed,
+            payable: payable
           });
         })
         .catch(err => console.error('Failed to fetch referral stats:', err));
     }
-  }, [showClaimModal, isConnected, account])
+  }, [showClaimModal, isConnected, account, wallets])
 
   // Auto-bind referral on page load
   useEffect(() => {
@@ -776,7 +947,7 @@ function App() {
       if (refCode) {
         console.log(`🎯 Detected referral code: ${refCode}`);
         
-        fetch(`https://plasm-x-swap-backend.vercel.app/api/bind-by-code`, {
+        fetch(`${API_BASE}/api/referrals/bind-code`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -942,6 +1113,13 @@ function App() {
   // Clean wallet connection
   const connectWallet = async () => {
     try {
+      if (!ready) {
+        console.log('⏳ Privy not ready yet...')
+        showToast('Please wait, loading...', 'info')
+        return
+      }
+      
+      console.log('🚀 Calling Privy login()...')
       await login()
       
       // Force balance update after Privy connection
@@ -951,26 +1129,8 @@ function App() {
       }, 2000);
       
     } catch (error) {
-      console.error('Wallet connection failed:', error)
-      
-      // Fallback to direct wallet connection
-      if (window.ethereum) {
-        try {
-          await connectDirectWallet()
-          
-          // Force balance update after direct connection
-          setTimeout(() => {
-            console.log('🔄 Force updating balances after direct connect...');
-            updateBalances();
-          }, 2000);
-          
-        } catch (directError) {
-          console.error('Direct connection also failed:', directError)
-          showToast('Unable to connect. Please refresh the page and try again.', 'error')
-        }
-      } else {
-        showToast('Please install MetaMask or another Web3 wallet to continue.', 'warning')
-      }
+      console.error('❌ Wallet connection failed:', error)
+      showToast('Unable to connect wallet. Please try again.', 'error')
     }
   }
 
@@ -1040,9 +1200,15 @@ function App() {
   const disconnectWallet = async () => {
     try {
       await logout()
+      
+      // Clear localStorage persistence
+      localStorage.removeItem('wallet_address');
+      localStorage.removeItem('wallet_connected');
+      
       setAccount('')
       setIsConnected(false)
       setNetwork(null)
+      console.log('✅ Wallet disconnected')
     } catch (error) {
       console.error('❌ Error disconnecting:', error)
     }
@@ -1562,7 +1728,7 @@ function App() {
         try {
           const grossAmountWei = ethers.parseUnits(fromAmount, fromToken.decimals || 18).toString();
           
-          const response = await fetch(`https://plasm-x-swap-backend.vercel.app/api/track-swap`, {
+          const response = await fetch(`${API_BASE}/api/track-swap`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2112,7 +2278,7 @@ function App() {
                             
                             setIsCreatingCode(true);
                             try {
-                              const response = await fetch(`https://plasm-x-swap-backend.vercel.app/api/create-referral-code`, {
+                              const response = await fetch(`${API_BASE}/api/referrals/create-code`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -2314,11 +2480,10 @@ function App() {
                     setIsClaiming(true);
                     try {
                       // Get vault info
-                      const apiBase = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
-                      console.log('🌐 Using API:', apiBase);
+                      console.log('🌐 Using API:', API_BASE);
                       
                       console.log('🔄 Step 1: Fetching vault info...');
-                      const vaultInfo = await getVaultInfo(apiBase);
+                      const vaultInfo = await getVaultInfo(API_BASE);
                       console.log('✅ Step 1 SUCCESS - Vault info:', vaultInfo);
                       
                       if (!vaultInfo.configured) {
@@ -2326,19 +2491,38 @@ function App() {
                         return;
                       }
                       
-                      console.log('🔄 Step 2: Getting wallet signer...');
-                      // Get ethers signer from Privy wallet
-                      const provider = new ethers.BrowserProvider(window.ethereum);
-                      const signer = await provider.getSigner();
-                      const signerAddr = await signer.getAddress();
-                      console.log('✅ Step 2 SUCCESS - Signer address:', signerAddr);
+                      console.log('🔄 Step 2: Getting Privy wallet provider...');
+                      // Get raw provider from Privy wallet (NOT wrapped in BrowserProvider)
+                      const connectedWallet = wallets?.[0];
+                      if (!connectedWallet) {
+                        throw new Error('No wallet connected');
+                      }
+                      
+                      const walletProvider = await connectedWallet.getEthereumProvider();
+                      console.log('✅ Step 2 SUCCESS - Got Privy provider for:', account);
                       
                       console.log('🔄 Step 3: Claiming fees...');
-                      // Claim fees
+                      // Claim fees using raw provider (Privy-compatible)
                       const amountWei = ethers.parseEther(claimAmount);
                       console.log('💰 Amount in wei:', amountWei.toString());
-                      await claimReferralFee(apiBase, vaultInfo.vaultAddress, 'native', amountWei.toString(), signer);
+                      await claimReferralFee(API_BASE, vaultInfo.vaultAddress, 'native', amountWei.toString(), walletProvider, account);
                       console.log('✅ Step 3 SUCCESS - Claim completed!');
+                      
+                      // Reload referral data to update display
+                      console.log('🔄 Refreshing referral data...');
+                      const response = await fetch(`${API_BASE}/api/referrals/my-code/${account}`);
+                      const data = await response.json();
+                      
+                      const totalEarned = data.totalEarnings || '0';
+                      const totalClaimed = data.totalClaimed || '0';
+                      const payable = (BigInt(totalEarned) - BigInt(totalClaimed)).toString();
+                      
+                      setReferralEarnings({
+                        totalEarned: totalEarned,
+                        totalClaimed: totalClaimed,
+                        payable: payable
+                      });
+                      console.log('✅ Refreshed! New available:', ethers.formatEther(payable), 'XPL');
                       
                       showToast(`Successfully claimed ${claimAmount} XPL!`, 'success');
                       setClaimAmount('');
@@ -2554,12 +2738,15 @@ function App() {
                 if (launchFilter === 'new') {
                   // Show only tokens with bonding progress < 1%
                   return (token.bondingProgress || 0) < 1;
+                } else if (launchFilter === 'high') {
+                  // Show only tokens with HIGH bonding progress (>= 2%)
+                  return (token.bondingProgress || 0) >= 2 && token.isComplete !== true;
                 } else if (launchFilter === 'listed') {
                   // Show only completed tokens (100% bonded to DEX)
                   return token.isComplete === true;
                 } else if (launchFilter === 'all') {
-                  // "All" filter: exclude completed tokens (they're already on DEX)
-                  return token.isComplete !== true;
+                  // "All" filter: show only tokens with >= 0.1% progress (filter out dead tokens)
+                  return (token.bondingProgress || 0) >= 0.1;
                 }
                 
                 return true;
@@ -2584,6 +2771,8 @@ function App() {
                   // Apply launch filter
                   if (launchFilter === 'new') {
                     return (token.bondingProgress || 0) < 1;
+                  } else if (launchFilter === 'high') {
+                    return (token.bondingProgress || 0) >= 2 && token.isComplete !== true;
                   } else if (launchFilter === 'listed') {
                     return token.isComplete === true;
                   } else if (launchFilter === 'all') {
@@ -2674,8 +2863,8 @@ function App() {
                         className="btn-trade-inline"
                         onClick={() => {
                           // Add token to custom tokens if not exists
-                          const existingToken = tokens.find(t => t.address.toLowerCase() === token.address.toLowerCase());
-                          if (!existingToken) {
+                          let targetToken = tokens.find(t => t.address.toLowerCase() === token.address.toLowerCase());
+                          if (!targetToken) {
                             const newToken = {
                               symbol: token.symbol,
                               name: token.name,
@@ -2687,11 +2876,17 @@ function App() {
                             setTokens(updatedTokens);
                             const customTokens = updatedTokens.filter(t => !['XPL', 'WXPL', 'USDT0'].includes(t.symbol));
                             localStorage.setItem('customTokens', JSON.stringify(customTokens));
+                            targetToken = newToken; // Use the newly created token
                           }
                           
-                          // Set this token as the "TO" token in swap card
-                          setFromToken('native'); // Default to XPL
-                          setToToken(token.address);
+                          // Set FROM token as XPL (find it in tokens list)
+                          const xplToken = tokens.find(t => t.symbol === 'XPL');
+                          if (xplToken) {
+                            setFromToken(xplToken);
+                          }
+                          
+                          // Set TO token as the clicked token (complete object)
+                          setToToken(targetToken);
                           setFromAmount('1'); // Default amount
                           
                           // Close launch page and go to swap
@@ -2775,7 +2970,14 @@ function App() {
               >
                 <div className="token-info">
                   {fromToken ? (
-                    <TokenLogo token={fromToken} size={24} className="token-logo-select" />
+                    <TokenLogo 
+                      token={fromToken} 
+                      size={24} 
+                      className="token-logo-select" 
+                      getLogoUrl={getLogoUrl}
+                      handleImageLoad={handleImageLoad}
+                      handleImageError={handleImageError}
+                    />
                   ) : (
                     <div className="token-placeholder" style={{width: 24, height: 24, borderRadius: '50%', backgroundColor: '#4b7688'}}></div>
                   )}
@@ -2862,7 +3064,14 @@ function App() {
               >
                 <div className="token-info">
                   {toToken ? (
-                    <TokenLogo token={toToken} size={24} className="token-logo-select" />
+                    <TokenLogo 
+                      token={toToken} 
+                      size={24} 
+                      className="token-logo-select" 
+                      getLogoUrl={getLogoUrl}
+                      handleImageLoad={handleImageLoad}
+                      handleImageError={handleImageError}
+                    />
                   ) : (
                     <div className="token-placeholder" style={{width: 24, height: 24, borderRadius: '50%', backgroundColor: '#4b7688'}}></div>
                   )}
@@ -3040,11 +3249,13 @@ function App() {
                       placeholder="Search or paste token address..."
                       value={tokenSearch}
                       onChange={async (e) => {
-                        const value = e.target.value.trim();
-                        setTokenSearch(value);
+                        const rawValue = e.target.value;
+                        setTokenSearch(rawValue);
                         
-                        // Auto-detect and add token address (0x followed by 40 hex chars)
-                        if (value.match(/^0x[a-fA-F0-9]{40}$/)) {
+                        const value = rawValue.trim();
+                        
+                        // Auto-detect and add token address (0x followed by 40 hex chars, case insensitive)
+                        if (value.toLowerCase().startsWith('0x') && value.length === 42) {
                           console.log('🔍 Detected token address, auto-adding:', value);
                           setIsLoadingToken(true);
                           await addCustomToken(value);
@@ -3069,7 +3280,14 @@ function App() {
                     onClick={() => selectToken(token)}
                   >
                     <div className="token-info">
-                      <TokenLogo token={token} size={32} className="token-logo-modal" />
+                      <TokenLogo 
+                        token={token} 
+                        size={32} 
+                        className="token-logo-modal" 
+                        getLogoUrl={getLogoUrl}
+                        handleImageLoad={handleImageLoad}
+                        handleImageError={handleImageError}
+                      />
                       <div className="token-details">
                         <span className="token-symbol">{token.symbol}</span>
                         <span className="token-name">{token.name}</span>
