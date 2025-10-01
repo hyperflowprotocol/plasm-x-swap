@@ -2293,7 +2293,8 @@ function App() {
                     Amount to Claim (XPL)
                   </label>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="0.0"
                     value={claimAmount}
                     onChange={(e) => setClaimAmount(e.target.value)}
@@ -2306,13 +2307,16 @@ function App() {
                   className="swap-btn"
                   disabled={!claimAmount || parseFloat(claimAmount) <= 0 || isClaiming}
                   onClick={async () => {
+                    console.log('🎯 CLAIM CLICKED! Amount:', claimAmount);
                     if (!claimAmount || parseFloat(claimAmount) <= 0) return;
                     
                     setIsClaiming(true);
                     try {
                       // Get vault info
-                      const apiBase = window.location.origin;
+                      const apiBase = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
+                      console.log('🌐 Using API:', apiBase);
                       const vaultInfo = await getVaultInfo(apiBase);
+                      console.log('✅ Vault info:', vaultInfo);
                       
                       if (!vaultInfo.configured) {
                         showToast('Vault not configured. Contact admin.', 'error');
