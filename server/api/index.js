@@ -267,7 +267,7 @@ app.post('/api/track-swap', async (req, res) => {
 // ============ VOUCHER SIGNING ENDPOINTS ============
 
 const VAULT_CONFIG = {
-  signerPK: (process.env.DEPLOYER_PRIVATE_KEY || '').trim(),
+  signerPK: (process.env.DEPLOYER_PRIVATE_KEY || process.env.SIGNER_PK || '').trim(),
   vaultAddress: (process.env.VAULT_ADDRESS || '0xB21486D9499a2cD8CE3e638E4077327affd8F24f').trim(),
   chainId: (process.env.CHAIN_ID || '9745').trim()
 };
