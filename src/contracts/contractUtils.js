@@ -57,13 +57,14 @@ export const WXPL_ABI = [
 // PumpFactory ABI - for detecting and getting bonding curve info
 export const PUMP_FACTORY_ABI = [
   "function isPumps(address) external view returns (bool)",
-  "function getLaunchInfo(address) external view returns (tuple(address owner, address token, uint256 realEthReserves, uint256 realTokenReserves, uint256 initialVirtualEthReserves, uint256 initialVirtualTokenReserves, uint256 virtualEthReserves, uint256 liquidityEth, uint256 liquidityToken, bool complete))"
+  "function getLaunchInfo(address) external view returns (tuple(address owner, address token, uint256 realEthReserves, uint256 realTokenReserves, uint256 initialVirtualEthReserves, uint256 initialVirtualTokenReserves, uint256 virtualEthReserves, uint256 liquidityEth, uint256 liquidityToken, bool complete))",
+  "function launchsForAll(bool _desc, uint256 _start, uint256 _end) external view returns (tuple(address owner, address token, uint256 realEthReserves, uint256 realTokenReserves, uint256 initialVirtualEthReserves, uint256 initialVirtualTokenReserves, uint256 virtualEthReserves, uint256 liquidityEth, uint256 liquidityToken, bool complete)[] launches, uint256 total)"
 ];
 
-// PumpRouter V3 ABI - ACTUAL working parameter order from real transaction
+// PumpRouter V3 ABI - ACTUAL from plasmascan.to
 export const PUMP_ROUTER_ABI = [
-  "function swapExactETHForTokensSupportingFeeOnTransferTokens(uint amountOutMin, address[] memory path, address to, uint deadline) payable",
-  "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, address team, uint256 teamRatePercent, uint256 deadline)"
+  "function swapExactETHForTokensSupportingFeeOnTransferTokens(uint amountOutMin, address[] memory path, address to, uint deadline) payable",  // NO team params
+  "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, address team, uint256 teamRatePercent, uint256 deadline)"  // HAS team params
 ];
 
 // PumpToken ABI - for getting bonding curve reserves
@@ -74,6 +75,12 @@ export const PUMP_TOKEN_ABI = [
   "function decimals() view returns (uint8)",
   "function symbol() view returns (string)",
   "function name() view returns (string)",
+  "function description() view returns (string)",
+  "function image() view returns (string)",
+  "function website() view returns (string)",
+  "function telegram() view returns (string)",
+  "function twitter() view returns (string)",
+  "function totalSupply() view returns (uint256)",
   "function balanceOf(address owner) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
@@ -103,15 +110,56 @@ export const CONTRACT_ADDRESSES = {
   }
 }
 
-// PLATFORM FEE CONFIGURATION
+// PLATFORM FEE CONFIGURATION - Frontend fee extraction for ALL swaps
 export const PLATFORM_FEE_CONFIG = {
-  feeBps: 10, // 10 basis points = 0.1% platform fee
-  feeRecipient: '0xF89D129C0Ae6D29727825EbBC47c6EDBd5B3787F', // Platform fee wallet
-  // Fee-exempt tokens (stablecoins and WXPL)
+  feeBps: 200, // 2% platform fee (200 basis points)
+  feeRecipient: '0x022ac0f0505be925e3863bb3af5f4c3aaacff1b0', // Platform wallet (100% collected, manual referrer distribution)
+  // Fee-exempt tokens (wrapping/unwrapping only)
   feeExemptTokens: [
-    '0x6100e367285b01f48d07953803a2d8dca5d19873', // WXPL
-    '0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb', // USDT0
+    '0x6100e367285b01f48d07953803a2d8dca5d19873', // WXPL (exempt for XPL ↔ WXPL wrapping)
   ]
+}
+
+/**
+ * Extract platform fee from XPL input amount BEFORE swap
+ * For swaps without on-chain team parameter support (PumpRouter BUY, DyorSwap ALL)
+ * @param {string} xplAmount - XPL amount user wants to spend
+ * @param {object} signer - Ethers signer
+ * @returns {object} - { feeAmount, swapAmount, feeReceipt }
+ */
+export async function extractPlatformFeeFromXPL(xplAmount, signer) {
+  try {
+    const xplAmountWei = ethers.parseEther(xplAmount.toString());
+    const feeWei = (xplAmountWei * BigInt(PLATFORM_FEE_CONFIG.feeBps)) / 10000n;
+    const swapAmountWei = xplAmountWei - feeWei;
+    
+    console.log('💰 Extracting platform fee from XPL:', {
+      totalXPL: ethers.formatEther(xplAmountWei),
+      platformFee: ethers.formatEther(feeWei),
+      swapAmount: ethers.formatEther(swapAmountWei),
+      feeRecipient: PLATFORM_FEE_CONFIG.feeRecipient
+    });
+    
+    // Send fee to platform wallet
+    const feeTx = await signer.sendTransaction({
+      to: PLATFORM_FEE_CONFIG.feeRecipient,
+      value: feeWei
+    });
+    
+    console.log('⏳ Platform fee transaction sent:', feeTx.hash);
+    const feeReceipt = await feeTx.wait();
+    console.log('✅ Platform fee collected:', feeReceipt.hash);
+    
+    return {
+      feeAmount: ethers.formatEther(feeWei),
+      swapAmount: ethers.formatEther(swapAmountWei),
+      swapAmountWei: swapAmountWei,
+      feeReceipt: feeReceipt
+    };
+  } catch (error) {
+    console.error('❌ Fee extraction failed:', error);
+    throw error;
+  }
 }
 
 // Network configurations 
@@ -950,21 +998,48 @@ export async function getTokenInfo(contractAddress, provider = null) {
 }
 
 /**
- * Get token balance
+ * Get ERC20 token balance by address (for custom/meme tokens)
  */
-export async function getTokenBalance(tokenSymbol, userAddress, provider) {
+export async function getERC20BalanceByAddress(tokenAddress, userAddress, provider) {
   try {
-    if (tokenSymbol === 'XPL') {
+    console.log(`💰 Getting balance for token: ${tokenAddress}`);
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const [balance, decimals] = await Promise.all([
+      tokenContract.balanceOf(userAddress),
+      tokenContract.decimals()
+    ]);
+    const formatted = ethers.formatUnits(balance, decimals);
+    console.log(`✅ Balance: ${formatted}`);
+    return formatted;
+  } catch (error) {
+    console.error(`Error getting balance for ${tokenAddress}:`, error);
+    return '0.0';
+  }
+}
+
+/**
+ * Get token balance (supports both symbol and address)
+ */
+export async function getTokenBalance(tokenSymbolOrAddress, userAddress, provider) {
+  try {
+    // Native XPL
+    if (tokenSymbolOrAddress === 'XPL' || tokenSymbolOrAddress === 'native') {
       const balance = await provider.getBalance(userAddress);
       return ethers.formatEther(balance);
-    } else {
-      const tokenContract = getTokenContractSmart(tokenSymbol, provider);
-      const balance = await tokenContract.balanceOf(userAddress);
-      const decimals = await tokenContract.decimals();
-      return ethers.formatUnits(balance, decimals);
     }
+    
+    // If it's an address (starts with 0x), use address-based fetching
+    if (tokenSymbolOrAddress.startsWith('0x')) {
+      return await getERC20BalanceByAddress(tokenSymbolOrAddress, userAddress, provider);
+    }
+    
+    // Otherwise use symbol-based fetching (for default tokens)
+    const tokenContract = getTokenContractSmart(tokenSymbolOrAddress, provider);
+    const balance = await tokenContract.balanceOf(userAddress);
+    const decimals = await tokenContract.decimals();
+    return ethers.formatUnits(balance, decimals);
   } catch (error) {
-    console.error(`Error getting ${tokenSymbol} balance:`, error);
+    console.error(`Error getting ${tokenSymbolOrAddress} balance:`, error);
     return '0.0';
   }
 }
@@ -995,10 +1070,18 @@ export async function swapXPLForPumpTokens(tokenAddress, xplAmount, minTokens, s
   try {
     console.log('💎 SwapXPLForPumpTokens called:', { tokenAddress, xplAmount, minTokens });
     
-    const xplAmountInWei = ethers.parseEther(xplAmount.toString());
+    // STEP 1: Extract 2% platform fee FIRST
+    console.log('💰 Extracting 2% platform fee from input...');
+    const feeResult = await extractPlatformFeeFromXPL(xplAmount, signer);
+    console.log('✅ Fee extracted:', feeResult.feeAmount, 'XPL');
+    
+    // STEP 2: Swap remaining amount (98% of original)
     const tokenContract = new ethers.Contract(tokenAddress, PUMP_TOKEN_ABI, signer);
     const decimals = await tokenContract.decimals();
     const minTokensInWei = ethers.parseUnits(minTokens.toString(), decimals);
+    
+    // Adjust minTokens for 98% of original amount (since we took 2% fee)
+    const adjustedMinTokens = (minTokensInWei * 98n) / 100n;
     
     const pumpRouter = new ethers.Contract(
       CONTRACT_ADDRESSES.PUMP_ROUTER,
@@ -1013,26 +1096,35 @@ export async function swapXPLForPumpTokens(tokenAddress, xplAmount, minTokens, s
     
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
     
-    console.log('💎 PumpToken swap details:', {
-      xplAmountInWei: xplAmountInWei.toString(),
-      minTokensInWei: minTokensInWei.toString(),
+    console.log('💎 PumpToken BUY details (after 2% fee extracted):', {
+      originalXPL: xplAmount,
+      feeExtracted: feeResult.feeAmount,
+      swapAmount: feeResult.swapAmount,
+      swapAmountWei: feeResult.swapAmountWei.toString(),
+      adjustedMinTokens: adjustedMinTokens.toString(),
       path,
+      to: await signer.getAddress(),
       deadline
     });
     
     const tx = await pumpRouter.swapExactETHForTokensSupportingFeeOnTransferTokens(
-      minTokensInWei,
+      adjustedMinTokens,
       path,
       await signer.getAddress(),
       deadline,
-      { value: xplAmountInWei }
+      { value: feeResult.swapAmountWei }  // Use 98% amount (after fee)
     );
     
     console.log('⏳ PumpToken buy transaction sent:', tx.hash);
     const receipt = await tx.wait();
     console.log('✅ PumpToken buy confirmed:', receipt);
     
-    return { success: true, txHash: receipt.hash };
+    return { 
+      success: true, 
+      txHash: receipt.hash,
+      feeExtracted: feeResult.feeAmount,
+      feeTxHash: feeResult.feeReceipt.hash
+    };
   } catch (error) {
     console.error('❌ PumpToken buy failed:', error);
     throw error;
@@ -1080,9 +1172,9 @@ export async function swapPumpTokensForXPL(tokenAddress, tokenAmount, minXPL, si
     
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
     
-    // Team parameters - use user address (PumpRouter rejects ZeroAddress!)
-    const teamAddress = userAddress;  // Use seller's address
-    const teamRatePercent = 0n;       // No team fee (BigInt)
+    // Team parameters - Platform fee collection (2% of swap = 200 basis points)
+    const teamAddress = '0x022ac0f0505be925e3863bb3af5f4c3aaacff1b0';  // Platform wallet (100% collected, manual referrer distribution)
+    const teamRatePercent = 200n;  // 2% fee (200 basis points = 2%)
     
     console.log('💎 PumpToken sell details (V3 CORRECT format):', {
       amountIn: tokenAmountInWei.toString(),
@@ -1181,10 +1273,29 @@ export async function swapXPLForTokens(tokenSymbol, xplAmount, minTokens, signer
       formatted: ethers.formatEther(xplAmountInWei)
     });
     
+    // Check if this is WXPL wrap (no fees)
+    const isWXPLWrap = tokenAddress.toLowerCase() === CONTRACT_ADDRESSES.WXPL.toLowerCase();
+    
+    // STEP 1: Extract 2% platform fee FIRST (unless WXPL wrap)
+    let feeResult = null;
+    let actualSwapAmount = xplAmountInWei;
+    
+    if (!isWXPLWrap) {
+      console.log('💰 Extracting 2% platform fee from XPL input...');
+      feeResult = await extractPlatformFeeFromXPL(xplAmount, signer);
+      actualSwapAmount = feeResult.swapAmountWei;
+      console.log('✅ Fee extracted:', feeResult.feeAmount, 'XPL');
+    } else {
+      console.log('🔄 WXPL wrap detected - NO FEES');
+    }
+    
     // For token output, get the token contract to determine decimals
     const tokenContract = getTokenContractSmart(tokenSymbol, signer);
     const decimals = await tokenContract.decimals();
     const minTokensInWei = ethers.parseUnits(minTokens.toString(), decimals);
+    
+    // Adjust minOut for fee deduction (unless WXPL)
+    const adjustedMinOut = isWXPLWrap ? minTokensInWei : (minTokensInWei * 98n) / 100n;
     
     // Set deadline to 20 minutes from now
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
@@ -1220,23 +1331,23 @@ export async function swapXPLForTokens(tokenSymbol, xplAmount, minTokens, signer
     
     console.log('🚀 Using fixed gas limit for reliability:', gasLimit.toString());
     
-    // NO FEE DEDUCTION HERE - fee already handled in quote calculation!
     const userAddress = signerAddress;
     
     console.log('🔧 Safe swap parameters:', {
-      inputXPL: ethers.formatEther(xplAmountInWei),
-      minTokensOut: ethers.formatUnits(minTokensInWei, decimals),
+      inputXPL: ethers.formatEther(actualSwapAmount),
+      minTokensOut: ethers.formatUnits(adjustedMinOut, decimals),
+      feeExtracted: feeResult ? feeResult.feeAmount + ' XPL' : 'None (WXPL wrap)',
       slippageTolerance: 'From UI settings (already applied)'
     });
     
-    // Execute swap with slippage from UI (already applied in minTokensInWei)
+    // Execute swap with actual amount (after fee extraction)
     const txPromise = router.swapExactETHForTokens(
-      minTokensInWei, // Use minTokensInWei from frontend (slippage already applied)
+      adjustedMinOut, // Adjusted for fee (98% if fee was extracted)
       path,
       userAddress,
       deadline,
       { 
-        value: xplAmountInWei, // Use FULL amount (fee already deducted in quote)
+        value: actualSwapAmount, // 98% of original if fee was extracted, 100% for WXPL
         gasLimit: gasLimit
       }
     );
@@ -1250,7 +1361,16 @@ export async function swapXPLForTokens(tokenSymbol, xplAmount, minTokens, signer
     console.log('✅ Swap transaction confirmed:', receipt.transactionHash);
     console.log('✅ Swap completed successfully!');
     
-    return { success: true, txHash: receipt.transactionHash };
+    const result = { success: true, txHash: receipt.transactionHash };
+    
+    // Include fee info if fee was collected
+    if (feeResult) {
+      result.feeExtracted = feeResult.feeAmount;
+      result.feeTxHash = feeResult.feeReceipt.hash;
+      console.log('💰 Platform fee collected:', feeResult.feeAmount, 'XPL');
+    }
+    
+    return result;
   } catch (error) {
     console.error(`Error swapping XPL for ${tokenSymbol}:`, error);
     return { success: false, error: error.message };
@@ -1356,26 +1476,55 @@ export async function swapTokensForTokensGeneric(fromToken, toToken, tokenAmount
     const maxPriorityFeePerGas = gasPrice.maxPriorityFeePerGas;
     
     let tx;
+    let feeResult = null;
+    let actualSwapAmount = tokenAmountInWei;
+    let adjustedMinOut = minTokensOutInWei;
+    let balanceBefore = 0n;
+    
+    // For Token → XPL swaps, record balance BEFORE to calculate received amount
+    if (toToken.address === 'native') {
+      balanceBefore = await signer.provider.getBalance(signerAddress);
+      console.log('📊 XPL balance before swap:', ethers.formatEther(balanceBefore));
+    }
+    
+    // Check if this is a WXPL wrap/unwrap (no fees for these)
+    const isWXPLWrap = fromToken.address === 'native' && toToken.address.toLowerCase() === CONTRACT_ADDRESSES.WXPL.toLowerCase();
+    const isWXPLUnwrap = toToken.address === 'native' && fromToken.address.toLowerCase() === CONTRACT_ADDRESSES.WXPL.toLowerCase();
+    const skipFees = isWXPLWrap || isWXPLUnwrap;
     
     // Choose appropriate swap method based on path type
     if (fromToken.address === 'native') {
-      // XPL → Token swap
-      console.log('🚀 Executing XPL → Token multi-hop swap...');
+      // XPL → Token swap - EXTRACT 2% FEE FIRST (unless WXPL wrap)
+      if (!skipFees) {
+        console.log('💰 DyorSwap: Extracting 2% platform fee from XPL input...');
+        feeResult = await extractPlatformFeeFromXPL(ethers.formatEther(tokenAmountInWei), signer);
+        actualSwapAmount = feeResult.swapAmountWei;
+        adjustedMinOut = (minTokensOutInWei * 98n) / 100n;  // Adjust for 2% fee deduction
+      } else {
+        console.log('🔄 WXPL wrap detected - NO FEES');
+      }
+      
+      const feeNote = skipFees ? '(NO FEES)' : '(after 2% fee extracted)';
+      console.log(`🚀 Executing XPL → Token multi-hop swap ${feeNote}...`);
       tx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
-        minTokensOutInWei,
+        adjustedMinOut,
         swapPath,
         signerAddress,
         deadline,
         {
-          value: tokenAmountInWei,
+          value: actualSwapAmount,  // Use 98% (after fee)
           gasLimit,
           maxFeePerGas,
           maxPriorityFeePerGas
         }
       );
     } else if (toToken.address === 'native') {
-      // Token → XPL swap
-      console.log('🚀 Executing Token → XPL multi-hop swap...');
+      // Token → XPL swap - Will extract 2% fee from OUTPUT after swap (unless WXPL unwrap)
+      if (skipFees) {
+        console.log('🚀 Executing WXPL unwrap (NO FEES)...');
+      } else {
+        console.log('🚀 Executing Token → XPL multi-hop swap (will extract 2% fee from output)...');
+      }
       tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
         tokenAmountInWei,
         minTokensOutInWei,
@@ -1409,12 +1558,63 @@ export async function swapTokensForTokensGeneric(fromToken, toToken, tokenAmount
     const receipt = await tx.wait();
     console.log('✅ Generic multi-hop swap confirmed in block:', receipt.blockNumber);
     
-    return {
+    const result = {
       success: true,
       txHash: tx.hash,
       blockNumber: receipt.blockNumber,
       gasUsed: receipt.gasUsed.toString()
     };
+    
+    // Include fee extraction details if fee was collected from INPUT (XPL → Token)
+    if (feeResult) {
+      result.feeExtracted = feeResult.feeAmount;
+      result.feeTxHash = feeResult.feeReceipt.hash;
+      console.log('💰 Platform fee extracted from INPUT:', feeResult.feeAmount, 'XPL');
+    }
+    
+    // Extract 2% fee from OUTPUT for Token → XPL swaps (DyorSwap only, skip for WXPL unwrap)
+    if (toToken.address === 'native' && !feeResult && !skipFees && balanceBefore > 0n) {
+      console.log('💰 Extracting 2% fee from XPL OUTPUT...');
+      try {
+        // Get user's XPL balance AFTER swap
+        const balanceAfter = await signer.provider.getBalance(signerAddress);
+        console.log('📊 XPL balance after swap:', ethers.formatEther(balanceAfter));
+        
+        // Calculate received XPL (after - before, accounting for gas)
+        // Note: balanceAfter includes the swap output minus gas costs
+        const gasUsed = receipt.gasUsed * (gasPrice.maxFeePerGas || gasPrice.gasPrice);
+        const receivedXPL = balanceAfter - balanceBefore + gasUsed;
+        
+        console.log('📈 XPL received from swap:', ethers.formatEther(receivedXPL));
+        
+        // Calculate 2% fee from received amount
+        const feeAmount = (receivedXPL * BigInt(PLATFORM_FEE_CONFIG.feeBps)) / 10000n;
+        
+        // Only extract if fee is meaningful (> 0.001 XPL)
+        if (feeAmount > ethers.parseEther('0.001')) {
+          console.log('💸 Sending 2% fee to platform:', ethers.formatEther(feeAmount), 'XPL');
+          
+          const feeTx = await signer.sendTransaction({
+            to: PLATFORM_FEE_CONFIG.feeRecipient,
+            value: feeAmount
+          });
+          
+          console.log('⏳ Output fee transaction sent:', feeTx.hash);
+          const feeReceipt = await feeTx.wait();
+          console.log('✅ Output fee collected:', feeReceipt.hash);
+          
+          result.feeExtracted = ethers.formatEther(feeAmount);
+          result.feeTxHash = feeReceipt.hash;
+        } else {
+          console.log('⚠️ Fee amount too small, skipping extraction');
+        }
+      } catch (feeError) {
+        console.error('⚠️ Output fee extraction failed (non-critical):', feeError.message);
+        // Don't fail the whole swap if fee extraction fails
+      }
+    }
+    
+    return result;
     
   } catch (error) {
     console.error(`❌ Generic multi-hop swap error (${fromToken.symbol} → ${toToken.symbol}):`, error);
@@ -1627,6 +1827,13 @@ export async function swapTokensForXPL(tokenSymbol, tokenAmount, minXPL, signer)
       console.log('✅ Sufficient allowance already exists');
     }
     
+    // Check if this is WXPL unwrap (no fees for WXPL unwrap)
+    const isWXPLUnwrap = tokenAddress.toLowerCase() === CONTRACT_ADDRESSES.WXPL.toLowerCase();
+    
+    // Record balance BEFORE swap for post-swap fee extraction
+    const balanceBefore = await signer.provider.getBalance(userAddress);
+    console.log('📊 XPL balance before swap:', ethers.formatEther(balanceBefore));
+    
     // Set deadline to 20 minutes from now
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
     
@@ -1636,7 +1843,8 @@ export async function swapTokensForXPL(tokenSymbol, tokenAmount, minXPL, signer)
       minXPLInWei: minXPLInWei.toString(),
       path,
       userAddress,
-      deadline
+      deadline,
+      willExtractFee: !isWXPLUnwrap
     });
     
     // Use SIMPLE fixed gas limits for reliability  
@@ -1669,7 +1877,52 @@ export async function swapTokensForXPL(tokenSymbol, tokenAmount, minXPL, signer)
     console.log('✅ Swap transaction confirmed:', receipt.transactionHash);
     console.log('✅ Token→XPL swap completed successfully!');
     
-    return { success: true, txHash: swapTx.hash, receipt };
+    const result = { success: true, txHash: swapTx.hash, receipt };
+    
+    // Extract 2% fee from OUTPUT XPL (unless WXPL unwrap)
+    if (!isWXPLUnwrap) {
+      console.log('💰 Extracting 2% fee from XPL OUTPUT...');
+      try {
+        // Get balance AFTER swap
+        const balanceAfter = await signer.provider.getBalance(userAddress);
+        console.log('📊 XPL balance after swap:', ethers.formatEther(balanceAfter));
+        
+        // Calculate received XPL (accounting for gas)
+        const gasUsed = receipt.gasUsed * receipt.gasPrice;
+        const receivedXPL = balanceAfter - balanceBefore + gasUsed;
+        
+        console.log('📈 XPL received from swap:', ethers.formatEther(receivedXPL));
+        
+        // Calculate 2% fee
+        const feeAmount = (receivedXPL * BigInt(PLATFORM_FEE_CONFIG.feeBps)) / 10000n;
+        
+        // Only extract if fee is meaningful (> 0.001 XPL)
+        if (feeAmount > ethers.parseEther('0.001')) {
+          console.log('💸 Sending 2% fee to platform:', ethers.formatEther(feeAmount), 'XPL');
+          
+          const feeTx = await signer.sendTransaction({
+            to: PLATFORM_FEE_CONFIG.feeRecipient,
+            value: feeAmount
+          });
+          
+          console.log('⏳ Output fee transaction sent:', feeTx.hash);
+          const feeReceipt = await feeTx.wait();
+          console.log('✅ Output fee collected:', feeReceipt.hash);
+          
+          result.feeExtracted = ethers.formatEther(feeAmount);
+          result.feeTxHash = feeReceipt.hash;
+        } else {
+          console.log('⚠️ Fee amount too small, skipping extraction');
+        }
+      } catch (feeError) {
+        console.error('⚠️ Output fee extraction failed (non-critical):', feeError.message);
+        // Don't fail the whole swap if fee extraction fails
+      }
+    } else {
+      console.log('🔄 WXPL unwrap detected - NO FEES');
+    }
+    
+    return result;
   } catch (error) {
     console.error(`❌ Error swapping ${tokenSymbol} for XPL:`, error);
     console.error(`❌ Error code:`, error.code);
@@ -1855,5 +2108,132 @@ export async function unwrapWXPL(wxplAmount, signer) {
   } catch (error) {
     console.error('❌ Error unwrapping WXPL:', error);
     return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Fetch all launched tokens DIRECTLY from blockchain (no backend needed)
+ */
+export async function fetchLaunchedTokensOnchain() {
+  try {
+    console.log('🚀 Fetching launched tokens DIRECTLY from blockchain...');
+    
+    const provider = getPlasmaProvider();
+    const pumpFactory = new ethers.Contract(
+      CONTRACT_ADDRESSES.PUMP_FACTORY,
+      PUMP_FACTORY_ABI,
+      provider
+    );
+    
+    // Get launches from blockchain
+    const MAX_TOKENS = 200;
+    console.log(`📊 Calling launchsForAll(true, 0, ${MAX_TOKENS})...`);
+    
+    const [launchesArray, totalCount] = await pumpFactory.launchsForAll(true, 0, MAX_TOKENS);
+    console.log(`✅ Received ${launchesArray.length} launches (total: ${totalCount.toString()})`);
+    
+    // Dedupe by token address
+    const seen = new Set();
+    const uniqueLaunches = [];
+    for (const launch of launchesArray) {
+      if (!seen.has(launch.token)) {
+        seen.add(launch.token);
+        uniqueLaunches.push(launch);
+      }
+    }
+    
+    console.log(`✅ Found ${uniqueLaunches.length} UNIQUE tokens`);
+    
+    // Fetch metadata for each token (limit to 100 to avoid timeout)
+    const tokens = [];
+    const METADATA_LIMIT = 100;
+    
+    for (let i = 0; i < Math.min(uniqueLaunches.length, METADATA_LIMIT); i++) {
+      try {
+        const launch = uniqueLaunches[i];
+        const tokenAddress = launch.token;
+        
+        const tokenContract = new ethers.Contract(tokenAddress, PUMP_TOKEN_ABI, provider);
+        
+        let symbol = 'UNKNOWN';
+        let name = 'Unknown';
+        let image = '';
+        
+        try {
+          symbol = await tokenContract.symbol();
+          name = symbol;
+        } catch (e) {
+          console.log(`  ⚠️ symbol() failed for ${tokenAddress.substring(0, 8)}`);
+        }
+        
+        if (symbol !== 'UNKNOWN') {
+          try {
+            const tokenName = await tokenContract.name();
+            if (tokenName && tokenName !== symbol && !tokenName.includes('bought')) {
+              name = tokenName;
+            }
+          } catch (e) {}
+          
+          try {
+            image = await tokenContract.image();
+          } catch (e) {}
+        }
+        
+        // Calculate bonding progress
+        const realEth = parseFloat(ethers.formatEther(launch.realEthReserves));
+        const targetEth = parseFloat(ethers.formatEther(launch.liquidityEth));
+        const bondingProgress = launch.complete ? 100 : (targetEth > 0 ? Math.min(100, (realEth / targetEth) * 100) : 0);
+        
+        // Calculate market cap
+        const virtualEth = parseFloat(ethers.formatEther(launch.virtualEthReserves));
+        const realTokens = parseFloat(ethers.formatEther(launch.realTokenReserves));
+        const currentPrice = realTokens > 0 ? virtualEth / realTokens : 0;
+        
+        let totalSupply = 1000000000;
+        try {
+          const ts = await tokenContract.totalSupply();
+          totalSupply = parseFloat(ethers.formatEther(ts));
+        } catch (e) {}
+        
+        const initialVirtualEth = parseFloat(ethers.formatEther(launch.initialVirtualEthReserves));
+        const initialVirtualTokens = parseFloat(ethers.formatEther(launch.initialVirtualTokenReserves));
+        const marketCap = initialVirtualTokens > 0 
+          ? initialVirtualEth * (totalSupply / initialVirtualTokens)
+          : currentPrice * totalSupply;
+        
+        const logoUrl = image ? `https://ipfs.io/ipfs/${image}` : '';
+        
+        tokens.push({
+          address: tokenAddress,
+          name: name,
+          symbol: symbol,
+          description: '',
+          logo: logoUrl,
+          bondingProgress: Math.min(bondingProgress, 100),
+          marketCap,
+          currentPrice,
+          isComplete: launch.complete
+        });
+        
+        console.log(`✅ [${i + 1}/${Math.min(uniqueLaunches.length, METADATA_LIMIT)}] $${symbol} (${name}) - Progress: ${bondingProgress.toFixed(1)}%`);
+        
+        // Small delay to avoid rate limiting
+        if (i < Math.min(uniqueLaunches.length, METADATA_LIMIT) - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        console.error(`❌ Error loading token:`, error.message);
+      }
+    }
+    
+    // Sort by bonding progress
+    tokens.sort((a, b) => b.bondingProgress - a.bondingProgress);
+    
+    console.log(`🎉 Successfully loaded ${tokens.length} tokens from blockchain!`);
+    return { tokens, total: tokens.length };
+    
+  } catch (error) {
+    console.error('❌ Error fetching launched tokens from blockchain:', error);
+    return { tokens: [], total: 0 };
   }
 }
