@@ -90,6 +90,7 @@ app.get('/', (req, res) => {
       '/api/track-swap',
       '/api/sign-voucher',
       '/api/vault-info',
+      '/api/launched-tokens',
       '/api/migrate',
       '/health'
     ]
@@ -539,6 +540,73 @@ app.get('/api/vault-info', (req, res) => {
     signerAddress: wallet ? wallet.address : 'Not set',
     domain: getVaultDomain()
   });
+});
+
+// GET /api/launched-tokens - Get launched tokens from DyorSwap Pump
+app.get('/api/launched-tokens', async (req, res) => {
+  try {
+    const PUMP_ADDRESS = '0x3e1d8e1a59b36d0e8f5f5b8b0e8f5e8b0e8f5e8b'; // DyorSwap Pump contract
+    const provider = new ethers.JsonRpcProvider('https://rpc.plasma.to');
+    
+    // Simple ABI for DyorSwap Pump - just what we need
+    const PUMP_ABI = [
+      'function getAllTokens() view returns (address[])',
+      'function tokenInfo(address) view returns (string name, string symbol, uint256 totalSupply, uint256 bondingCurve, bool isComplete)'
+    ];
+    
+    const contract = new ethers.Contract(PUMP_ADDRESS, PUMP_ABI, provider);
+    
+    // Get all token addresses with 5s timeout
+    const tokenAddresses = await withTimeout(
+      contract.getAllTokens(),
+      5000,
+      'getAllTokens'
+    );
+    
+    console.log(`📊 Found ${tokenAddresses.length} launched tokens`);
+    
+    // Fetch info for each token (max 20 tokens to avoid timeout)
+    const tokens = [];
+    const limit = Math.min(tokenAddresses.length, 20);
+    
+    for (let i = 0; i < limit; i++) {
+      try {
+        const addr = tokenAddresses[i];
+        const info = await withTimeout(
+          contract.tokenInfo(addr),
+          3000,
+          `tokenInfo ${addr.slice(0, 6)}`
+        );
+        
+        // Calculate bonding progress percentage
+        const bondingProgress = info.isComplete 
+          ? 100 
+          : (Number(info.bondingCurve) / 10000) * 100; // Assuming 10000 is max
+        
+        tokens.push({
+          address: addr,
+          name: info.name,
+          symbol: info.symbol,
+          totalSupply: info.totalSupply.toString(),
+          bondingProgress: bondingProgress,
+          isComplete: info.isComplete,
+          marketCap: 0, // Calculate if needed
+          currentPrice: 0 // Calculate if needed
+        });
+      } catch (err) {
+        console.error(`❌ Failed to fetch token ${tokenAddresses[i].slice(0, 6)}:`, err.message);
+        // Continue with other tokens
+      }
+    }
+    
+    console.log(`✅ Returning ${tokens.length} launched tokens`);
+    return res.json({ tokens });
+    
+  } catch (error) {
+    console.error('❌ Error fetching launched tokens:', error);
+    // Return empty array instead of error to keep frontend working
+    return res.json({ tokens: [] });
+  }
 });
 
 // Export for Vercel - direct export
