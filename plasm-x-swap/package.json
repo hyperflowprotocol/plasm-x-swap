@@ -1,7 +1,7 @@
 {
   "name": "plasm-x-swap",
   "private": true,
-  "version": "1.0.005884",
+  "version": "1.0.5885",
   "type": "module",
   "scripts": {
     "dev": "vite",
