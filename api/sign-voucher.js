@@ -1,5 +1,6 @@
-const { ethers } = require('ethers');
-const { Client } = require('pg');
+import { ethers } from 'ethers';
+import pg from 'pg';
+const { Client } = pg;
 
 const VAULT_CONFIG = {
   signerPK: process.env.SIGNER_PK || process.env.DEPLOYER_PRIVATE_KEY || null,
