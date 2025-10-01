@@ -486,6 +486,5 @@ app.get('/api/vault-info', (req, res) => {
   });
 });
 
-// Export for Vercel - wrap with serverless-http
-const serverless = require('serverless-http');
-module.exports = serverless(app);
+// Export for Vercel - direct export
+module.exports = app;
