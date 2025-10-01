@@ -2316,27 +2316,37 @@ function App() {
                       // Get vault info
                       const apiBase = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
                       console.log('🌐 Using API:', apiBase);
+                      
+                      console.log('🔄 Step 1: Fetching vault info...');
                       const vaultInfo = await getVaultInfo(apiBase);
-                      console.log('✅ Vault info:', vaultInfo);
+                      console.log('✅ Step 1 SUCCESS - Vault info:', vaultInfo);
                       
                       if (!vaultInfo.configured) {
                         showToast('Vault not configured. Contact admin.', 'error');
                         return;
                       }
                       
+                      console.log('🔄 Step 2: Getting wallet signer...');
                       // Get ethers signer from Privy wallet
                       const provider = new ethers.BrowserProvider(window.ethereum);
                       const signer = await provider.getSigner();
+                      const signerAddr = await signer.getAddress();
+                      console.log('✅ Step 2 SUCCESS - Signer address:', signerAddr);
                       
+                      console.log('🔄 Step 3: Claiming fees...');
                       // Claim fees
                       const amountWei = ethers.parseEther(claimAmount);
+                      console.log('💰 Amount in wei:', amountWei.toString());
                       await claimReferralFee(apiBase, vaultInfo.vaultAddress, 'native', amountWei.toString(), signer);
+                      console.log('✅ Step 3 SUCCESS - Claim completed!');
                       
                       showToast(`Successfully claimed ${claimAmount} XPL!`, 'success');
                       setClaimAmount('');
                       setShowClaimModal(false);
                     } catch (error) {
-                      console.error('Claim error:', error);
+                      console.error('❌ CLAIM FAILED AT:', error.message);
+                      console.error('❌ Full error:', error);
+                      console.error('❌ Error stack:', error.stack);
                       const errorMsg = formatClaimError(error);
                       showToast(errorMsg, 'error');
                     } finally {
