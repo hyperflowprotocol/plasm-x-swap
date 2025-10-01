@@ -23,8 +23,9 @@ import {
 } from './contracts/contractUtils'
 import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
-// API Base URL - uses environment variable or fallback
-const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://3a9e0063-77a5-47c3-8b08-e9c97e127f0a-00-39uxnbmqdszny.picard.replit.dev';
+// API Base URL - MUST be set via VITE_BACKEND_URL environment variable
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
+console.log('🌐 API_BASE configured:', API_BASE);
 
 // Popular tokens on Plasma chain - SUPPORTS ALL TOKENS
 const DEFAULT_TOKENS = [
