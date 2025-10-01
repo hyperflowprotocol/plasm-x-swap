@@ -21,7 +21,7 @@ import {
   unwrapWXPL,
   CONTRACT_ADDRESSES
 } from './contracts/contractUtils'
-import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils'
+import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
 // Popular tokens on Plasma chain - SUPPORTS ALL TOKENS
 const DEFAULT_TOKENS = [
@@ -748,14 +748,25 @@ function App() {
     return cleanup
   }, [ready, authenticated, user, wallets, account])
 
-  // Fetch referral earnings and custom code when claim modal opens
+  // Fetch referral code on wallet connection (auto-load on page load)
   useEffect(() => {
-    if (showClaimModal && isConnected && account) {
+    if (isConnected && account) {
       fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
         .then(res => res.json())
         .then(data => {
           setReferralCode(data.referralCode);
           setReferralCount(data.totalReferrals || 0);
+        })
+        .catch(err => console.error('Failed to fetch referral code:', err));
+    }
+  }, [isConnected, account])
+
+  // Fetch referral earnings when claim modal opens
+  useEffect(() => {
+    if (showClaimModal && isConnected && account) {
+      fetch(`https://plasm-x-swap-backend.vercel.app/api/referral-stats/${account}`)
+        .then(res => res.json())
+        .then(data => {
           // Always set earnings (even if zero) so UI shows the 3 boxes
           setReferralEarnings({
             totalEarned: data.totalEarnings || '0',
@@ -2018,7 +2029,7 @@ function App() {
       {showClaimModal && (
         <>
           <div className="coming-soon-overlay" onClick={() => setShowClaimModal(false)}></div>
-          <div className="coming-soon-modal claim-modal">
+          <div className="coming-soon-modal claim-modal" onClick={(e) => e.stopPropagation()}>
             <button className="close-modal-btn" onClick={() => setShowClaimModal(false)}>
               <X size={24} />
             </button>
@@ -2304,6 +2315,7 @@ function App() {
                 </div>
                 
                 <button 
+                  type="button"
                   className="swap-btn"
                   disabled={!claimAmount || parseFloat(claimAmount) <= 0 || isClaiming}
                   onClick={async () => {
@@ -2315,27 +2327,42 @@ function App() {
                       // Get vault info
                       const apiBase = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
                       console.log('🌐 Using API:', apiBase);
+                      
+                      console.log('🔄 Step 1: Fetching vault info...');
                       const vaultInfo = await getVaultInfo(apiBase);
-                      console.log('✅ Vault info:', vaultInfo);
+                      console.log('✅ Step 1 SUCCESS - Vault info:', vaultInfo);
                       
                       if (!vaultInfo.configured) {
                         showToast('Vault not configured. Contact admin.', 'error');
                         return;
                       }
                       
+                      console.log('🔄 Step 2: Getting wallet signer...');
                       // Get ethers signer from Privy wallet
                       const provider = new ethers.BrowserProvider(window.ethereum);
                       const signer = await provider.getSigner();
+                      const signerAddr = await signer.getAddress();
+                      console.log('✅ Step 2 SUCCESS - Signer address:', signerAddr);
                       
+                      console.log('🔄 Step 3: Claiming fees...');
                       // Claim fees
                       const amountWei = ethers.parseEther(claimAmount);
+                      console.log('💰 Amount in wei:', amountWei.toString());
                       await claimReferralFee(apiBase, vaultInfo.vaultAddress, 'native', amountWei.toString(), signer);
+                      console.log('✅ Step 3 SUCCESS - Claim completed!');
                       
                       showToast(`Successfully claimed ${claimAmount} XPL!`, 'success');
                       setClaimAmount('');
                       setShowClaimModal(false);
                     } catch (error) {
-                      console.error('Claim error:', error);
+                      console.error('❌ CLAIM FAILED AT:', error.message);
+                      console.error('❌ Full error:', error);
+                      console.error('❌ Error stack:', error.stack);
+                      
+                      // Show detailed error in alert for debugging on mobile
+                      const debugInfo = `Error: ${error.message}\nName: ${error.name}\nType: ${error.constructor.name}`;
+                      alert('CLAIM ERROR DEBUG:\n' + debugInfo);
+                      
                       const errorMsg = formatClaimError(error);
                       showToast(errorMsg, 'error');
                     } finally {
