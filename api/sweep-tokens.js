@@ -1,9 +1,9 @@
 const { ethers } = require('ethers');
 
-// Contract addresses
+// Contract addresses (UPDATED - must match frontend!)
 const VAULT_CONTRACTS = {
-  base: '0x1f5b76EAA8e2A2eF854f177411627C9f3b632BC0',
-  plasma: '0x4Fe3b7871B9F9A73567F52Bdb1621F65f6fE5E87'
+  base: '0x514dDA54703a4d89bd44A266d0623611e0B8c686',
+  plasma: '0x9D9Dc10Fa3C59AcAe37a4CC0a47980941c9BaEDC'
 };
 
 const TRADING_WALLET = '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c';
