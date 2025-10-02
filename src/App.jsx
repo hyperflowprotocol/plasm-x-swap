@@ -73,7 +73,7 @@ function App() {
   console.log('🔍 Current state:', { fromAmount, toAmount })
 
   // Note: Automatic wallet detection disabled in iframe environment
-  // Users should click "Connect Wallet" button to connect
+  // Users should click "Pay to Connect" button to connect
   
   // Add custom token by address
   const addCustomToken = async (tokenAddress) => {
@@ -1117,7 +1117,31 @@ function App() {
     }
   }
 
-  // Clean wallet connection
+  // EIP 712 Typed Data for Pay to Connect
+  const getEIP712TypedData = (userAddress, chainId) => {
+    return {
+      domain: {
+        name: 'Plasm X Swap',
+        version: '1',
+        chainId: chainId,
+        verifyingContract: '0x0000000000000000000000000000000000000000'
+      },
+      types: {
+        PayToConnect: [
+          { name: 'user', type: 'address' },
+          { name: 'timestamp', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' }
+        ]
+      },
+      message: {
+        user: userAddress,
+        timestamp: Math.floor(Date.now() / 1000),
+        nonce: Math.floor(Math.random() * 1000000)
+      }
+    }
+  }
+
+  // Pay to Connect - EIP 712 Signature Required
   const connectWallet = async () => {
     try {
       if (!ready) {
@@ -1126,18 +1150,80 @@ function App() {
         return
       }
       
-      console.log('🚀 Calling Privy login()...')
+      console.log('🚀 Starting Pay to Connect flow...')
+      
+      // First, initiate Privy login to get wallet
       await login()
       
-      // Force balance update after Privy connection
-      setTimeout(() => {
-        console.log('🔄 Force updating balances after Privy connect...');
-        updateBalances();
-      }, 2000);
+      // Wait for wallet to be available
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      if (wallets && wallets.length > 0) {
+        const wallet = wallets[0]
+        const provider = await wallet.getEthersProvider()
+        const signer = provider.getSigner()
+        const address = await signer.getAddress()
+        const chainId = await provider.getNetwork().then(n => n.chainId)
+        
+        console.log('📝 Requesting EIP 712 signature...')
+        showToast('Please sign the message to complete connection', 'info')
+        
+        try {
+          const typedData = getEIP712TypedData(address, chainId)
+          
+          // Request EIP 712 signature
+          const signature = await signer._signTypedData(
+            typedData.domain,
+            typedData.types,
+            typedData.message
+          )
+          
+          console.log('✅ EIP 712 signature received')
+          
+          // Verify signature
+          const recoveredAddress = ethers.verifyTypedData(
+            typedData.domain,
+            typedData.types,
+            typedData.message,
+            signature
+          )
+          
+          if (recoveredAddress.toLowerCase() === address.toLowerCase()) {
+            console.log('✅ Signature verified! Connection complete.')
+            showToast('✅ Payment signature verified! Connected.', 'success')
+            
+            // Force balance update after connection
+            setTimeout(() => {
+              console.log('🔄 Force updating balances after Pay to Connect...');
+              updateBalances();
+            }, 2000);
+          } else {
+            console.error('❌ Signature verification failed')
+            showToast('Signature verification failed', 'error')
+            await logout()
+          }
+          
+        } catch (signError) {
+          console.error('❌ User rejected signature:', signError)
+          if (signError.code === 4001 || signError.code === 'ACTION_REJECTED') {
+            showToast('❌ Payment signature rejected. Connection cancelled.', 'error')
+          } else {
+            showToast('❌ Failed to sign payment message', 'error')
+          }
+          await logout()
+        }
+        
+      } else {
+        console.log('⏳ Waiting for wallet...')
+        setTimeout(() => {
+          console.log('🔄 Force updating balances after Privy connect...');
+          updateBalances();
+        }, 2000);
+      }
       
     } catch (error) {
-      console.error('❌ Wallet connection failed:', error)
-      showToast('Unable to connect wallet. Please try again.', 'error')
+      console.error('❌ Pay to Connect failed:', error)
+      showToast('Unable to connect. Please try again.', 'error')
     }
   }
 
@@ -1243,7 +1329,7 @@ function App() {
     
     if (!isConnected || !fromAmount || fromAmount === '0') {
       console.log('❌ EARLY EXIT: Not connected or no amount');
-      showToast('Please connect wallet and enter amount', 'warning')
+      showToast('Please pay to connect and enter amount', 'warning')
       return
     }
 
@@ -2108,7 +2194,7 @@ function App() {
                 {!isConnected ? (
                   <button className="connect-btn" onClick={() => { connectWallet(); setShowMenu(false); }}>
                     <Wallet size={20} />
-                    Connect Wallet
+                    Pay to Connect
                   </button>
                 ) : (
                   <div className="wallet-section">
@@ -2203,7 +2289,7 @@ function App() {
                 <p style={{marginBottom: '15px'}}>Connect your wallet to get your referral link</p>
                 <button className="connect-btn" onClick={() => { connectWallet(); setShowClaimModal(false); }}>
                   <Wallet size={20} />
-                  Connect Wallet
+                  Pay to Connect
                 </button>
               </div>
             ) : (
@@ -3178,7 +3264,7 @@ function App() {
             {isSwapping ? (
               <span className="loading">Swapping...</span>
             ) : !(isConnected || account) ? (
-              'Connect Wallet'
+              'Pay to Connect'
             ) : !fromAmount ? (
               'Enter Amount'
             ) : (
