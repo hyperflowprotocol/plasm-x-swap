@@ -52,7 +52,7 @@ const PrivyWrapper = ({ children }) => {
           },
         },
 
-        // Supported chains - Only Plasma Network
+        // Supported chains - Plasma Network + Base
         supportedChains: [
           {
             id: 9745,
@@ -71,6 +71,26 @@ const PrivyWrapper = ({ children }) => {
               default: {
                 name: 'Plasma Explorer',
                 url: 'https://explorer.plasma.to',
+              },
+            },
+          },
+          {
+            id: 8453,
+            name: 'Base',
+            nativeCurrency: {
+              name: 'Ether',
+              symbol: 'ETH',
+              decimals: 18,
+            },
+            rpcUrls: {
+              default: {
+                http: ['https://mainnet.base.org'],
+              },
+            },
+            blockExplorers: {
+              default: {
+                name: 'BaseScan',
+                url: 'https://basescan.org',
               },
             },
           },
@@ -105,25 +125,11 @@ const PrivyWrapper = ({ children }) => {
           enabled: false,
         },
 
-        // Try to handle CSP restrictions
-        modal: {
-          customModalConfig: {
-            // Force external popups instead of iframes
-            forceExternalAuth: true,
-          },
-        },
-
-        // Enhanced wallet connection settings for Replit compatibility
+        // Enhanced wallet connection settings
         embeddedWallets: {
-          createOnLogin: 'off', // Ensure no embedded wallet creation
+          createOnLogin: 'off',
           requireUserPasswordOnCreate: false,
           noPromptOnSignature: true,
-          priceDisplay: false,
-        },
-
-        // Additional security settings
-        security: {
-          skipFrameCheck: true, // Skip frame ancestor checks if possible
         }
       }}
     >
