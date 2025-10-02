@@ -1,4 +1,4 @@
-const { registerWallet, getRegisteredWallets } = require('./cron-auto-sweep');
+const { registerWallet, getRegisteredWallets } = require('../lib/wallet-registry');
 
 module.exports = async (req, res) => {
   // Enable CORS
