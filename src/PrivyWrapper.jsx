@@ -12,30 +12,27 @@ const PrivyWrapper = ({ children }) => {
     <PrivyProvider
       appId={appId}
       config={{
-        // Login methods - ALL wallet options
-        loginMethods: ['wallet', 'email', 'sms'],
+        // ALL LOGIN METHODS
+        loginMethods: ['wallet'],
         
-        // Wallet connectors - Enable ALL popular wallets
-        walletConnectors: ['metamask', 'coinbase_wallet', 'wallet_connect', 'rainbow', 'phantom'],
-        
-        // Appearance
+        // Appearance - wallet first
         appearance: {
           theme: 'dark',
           accentColor: '#E0004F',
-          logo: 'https://plasm-x.exchange/logo.png',
-          showWalletLoginFirst: true // Show wallet options first
+          showWalletLoginFirst: true,
+          walletList: ['metamask', 'coinbase_wallet', 'rainbow', 'wallet_connect'],
+          walletChainType: 'ethereum-only'
         },
         
-        // Supported chains - XPL and Base
+        // Supported chains
+        defaultChain: { id: 9745 },
         supportedChains: [
           {
             id: 9745,
             name: 'Plasma Network',
-            network: 'plasma',
             nativeCurrency: { name: 'XPL', symbol: 'XPL', decimals: 18 },
             rpcUrls: {
-              default: { http: ['https://rpc.plasma.to'] },
-              public: { http: ['https://rpc.plasma.to'] }
+              default: { http: ['https://rpc.plasma.to'] }
             },
             blockExplorers: {
               default: { name: 'Plasma Explorer', url: 'https://plasma.blockscout.com' }
@@ -44,11 +41,9 @@ const PrivyWrapper = ({ children }) => {
           {
             id: 8453,
             name: 'Base',
-            network: 'base',
             nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
             rpcUrls: {
-              default: { http: ['https://mainnet.base.org'] },
-              public: { http: ['https://mainnet.base.org'] }
+              default: { http: ['https://mainnet.base.org'] }
             },
             blockExplorers: {
               default: { name: 'BaseScan', url: 'https://basescan.org' }
@@ -56,9 +51,8 @@ const PrivyWrapper = ({ children }) => {
           }
         ],
         
-        // Embedded wallet config
         embeddedWallets: {
-          createOnLogin: 'users-without-wallets'
+          createOnLogin: 'off'
         }
       }}
     >
