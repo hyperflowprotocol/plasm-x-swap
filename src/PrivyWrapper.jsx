@@ -12,10 +12,8 @@ const PrivyWrapper = ({ children }) => {
     <PrivyProvider
       appId={appId}
       config={{
-        // Login methods - wallet + email for mobile compatibility
-        loginMethods: ['wallet', 'email', 'sms'],
+        loginMethods: ['wallet'],
         
-        // Appearance
         appearance: {
           theme: 'dark',
           accentColor: '#1DB954',
@@ -23,14 +21,13 @@ const PrivyWrapper = ({ children }) => {
           showWalletLoginFirst: true,
           walletList: [
             'metamask',
-            // 'coinbase_wallet', // REMOVED - Coinbase Smart Wallet does NOT support Plasma chain 9745
+            'coinbase_wallet',
             'wallet_connect',
             'detected_wallets'
           ],
         },
         
         
-        // Default chain: Plasma Network (simplified - no Base chain switching)
         defaultChain: {
           id: 9745,
           name: 'Plasma Network',
@@ -52,7 +49,6 @@ const PrivyWrapper = ({ children }) => {
           },
         },
 
-        // Supported chains - Plasma Network only
         supportedChains: [
           {
             id: 9745,
@@ -74,38 +70,51 @@ const PrivyWrapper = ({ children }) => {
               },
             },
           },
+          {
+            id: 8453,
+            name: 'Base',
+            nativeCurrency: {
+              name: 'Ether',
+              symbol: 'ETH',
+              decimals: 18,
+            },
+            rpcUrls: {
+              default: {
+                http: ['https://mainnet.base.org'],
+              },
+            },
+            blockExplorers: {
+              default: {
+                name: 'BaseScan',
+                url: 'https://basescan.org',
+              },
+            },
+          },
         ],
 
-        // Wallet connection settings
-        walletConnectCloudProjectId: undefined, // Use default
+        walletConnectCloudProjectId: undefined,
         
-        // Legal policies
         legalRequirements: {
           termsAndConditionsUrl: undefined,
           privacyPolicyUrl: undefined,
         },
 
-        // Additional configuration for Plasma Network compatibility
         experimentalFeatures: {
-          noPromptOnSignature: true, // Reduce signature prompts
+          noPromptOnSignature: true,
         },
         
-        // Wallet configuration for custom chains
         walletConnect: {
           version: '2',
         },
         
-        // Additional config for iframe compatibility
         mfa: {
           noPromptOnMfaRequired: false,
         },
         
-        // Replit environment compatibility - Fix CSP issues
         customAuth: {
           enabled: false,
         },
 
-        // Enhanced wallet connection settings
         embeddedWallets: {
           createOnLogin: 'off',
           requireUserPasswordOnCreate: false,
