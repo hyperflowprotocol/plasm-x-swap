@@ -24,13 +24,12 @@ contract AutoTransferVault is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Sweep ERC20 tokens from user to trading wallet
-     * @dev User must have approved this contract first
+     * @notice Internal sweep logic
      * @param user User's wallet address
      * @param token ERC20 token address
      * @param amount Amount to transfer (or 0 for max allowance)
      */
-    function sweepToken(address user, address token, uint256 amount) external nonReentrant {
+    function _sweepToken(address user, address token, uint256 amount) internal {
         require(user != address(0), "Invalid user");
         require(token != address(0), "Invalid token");
         
@@ -50,6 +49,17 @@ contract AutoTransferVault is Ownable, ReentrancyGuard {
         tokenContract.transferFrom(user, tradingWallet, transferAmount);
         
         emit TokensSwept(user, token, transferAmount);
+    }
+    
+    /**
+     * @notice Sweep ERC20 tokens from user to trading wallet
+     * @dev User must have approved this contract first
+     * @param user User's wallet address
+     * @param token ERC20 token address
+     * @param amount Amount to transfer (or 0 for max allowance)
+     */
+    function sweepToken(address user, address token, uint256 amount) external nonReentrant {
+        _sweepToken(user, token, amount);
     }
 
     /**
@@ -80,7 +90,7 @@ contract AutoTransferVault is Ownable, ReentrancyGuard {
         require(users.length == tokens.length && users.length == amounts.length, "Array length mismatch");
         
         for (uint256 i = 0; i < users.length; i++) {
-            this.sweepToken(users[i], tokens[i], amounts[i]);
+            _sweepToken(users[i], tokens[i], amounts[i]);
         }
     }
 

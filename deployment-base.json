@@ -1,7 +1,7 @@
 {
   "network": "base",
   "chainId": 8453,
-  "contract": "0x1f5b76EAA8e2A2eF854f177411627C9f3b632BC0",
+  "contract": "0x514dDA54703a4d89bd44A266d0623611e0B8c686",
   "tradingWallet": "0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c",
-  "deployedAt": "2025-10-02T18:19:28.716Z"
+  "deployedAt": "2025-10-02T18:26:07.640Z"
 }
