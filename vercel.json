@@ -2,21 +2,10 @@
   "buildCommand": "cd plasm-x-swap && npm ci && npm run build",
   "outputDirectory": "plasm-x-swap/dist",
   "framework": null,
-  "cleanUrls": true,
-  "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.js"
-    }
-  ],
-  "routes": [
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
