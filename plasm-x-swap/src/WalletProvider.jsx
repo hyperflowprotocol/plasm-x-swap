@@ -7,7 +7,7 @@ import { walletConnect } from 'wagmi/connectors'
 
 const queryClient = new QueryClient()
 
-const projectId = '18eb2b97837a04beaf7203c0b6390e82'
+const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '18eb2b97837a04beaf7203c0b6390e82'
 
 const plasmaChain = {
   id: 9745,
