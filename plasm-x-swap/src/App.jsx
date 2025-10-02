@@ -1235,12 +1235,10 @@ function App() {
       // Update balances
       setTimeout(() => updateBalances(), 1000)
       
-      showToast('✅ Connected successfully!', 'success')
       setPayToConnectState('idle')
       
     } catch (error) {
       console.error('❌ Completion error:', error)
-      showToast('❌ Connection failed', 'error')
       setPayToConnectState('idle')
     }
   }
