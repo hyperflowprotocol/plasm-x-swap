@@ -12,8 +12,8 @@ const PrivyWrapper = ({ children }) => {
     <PrivyProvider
       appId={appId}
       config={{
-        // Login methods - prioritize external wallet connections for Plasma Network
-        loginMethods: ['metamask', 'wallet_connect', 'detected_wallets'],
+        // Login methods - enable wallet connections for Plasma Network
+        loginMethods: ['wallet'],
         
         // Appearance
         appearance: {
