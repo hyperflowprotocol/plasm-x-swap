@@ -958,7 +958,7 @@ function App() {
       console.log('🔗 Attempting direct wallet connection (MetaMask/WalletConnect)...')
       
       if (!window.ethereum) {
-        showToast('❌ No wallet found. Please install MetaMask or another Web3 wallet.', 'error')
+        console.error('❌ No wallet found')
         return
       }
 
@@ -1013,7 +1013,6 @@ function App() {
       
     } catch (error) {
       console.error('❌ Direct wallet connection failed:', error)
-      showToast('❌ Failed to connect wallet directly. Please try again.', 'error')
     }
   }
 
@@ -1022,7 +1021,6 @@ function App() {
   const forceClearAndReconnect = async () => {
     try {
       console.log('🧹 Force clearing all sessions...')
-      showToast('🧹 Clearing sessions...', 'info')
       
       // 1. Disconnect wallet
       if (isConnected) {
@@ -1041,11 +1039,10 @@ function App() {
       // 4. Wait a bit
       await new Promise(resolve => setTimeout(resolve, 1000))
       
-      showToast('✅ Cleared! Please reconnect.', 'success')
+      console.log('✅ Cleared! Please reconnect.')
       
     } catch (error) {
       console.error('❌ Force clear error:', error)
-      showToast('Cleared. Please refresh page and try again.', 'info')
     }
   }
 
@@ -1062,7 +1059,6 @@ function App() {
       
       console.log('🚀 Starting Pay to Connect flow...')
       setPayToConnectState('logging_in')
-      showToast('🔐 Connecting wallet...', 'info')
       
       // Open Web3Modal - this shows wallet options
       // The useEffect will handle payment signing when wallet connects
