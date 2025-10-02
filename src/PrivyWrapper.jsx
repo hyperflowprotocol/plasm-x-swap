@@ -92,7 +92,7 @@ const PrivyWrapper = ({ children }) => {
           },
         ],
 
-        walletConnectCloudProjectId: undefined,
+        walletConnectCloudProjectId: '18eb2b97837a04beaf7203c0b6390e82',
         
         legalRequirements: {
           termsAndConditionsUrl: undefined,
