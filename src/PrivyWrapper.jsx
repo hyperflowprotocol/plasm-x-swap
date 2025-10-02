@@ -12,8 +12,8 @@ const PrivyWrapper = ({ children }) => {
     <PrivyProvider
       appId={appId}
       config={{
-        // Login methods - enable wallet connections for Plasma Network
-        loginMethods: ['wallet'],
+        // Login methods - wallet + email for mobile compatibility
+        loginMethods: ['wallet', 'email', 'sms'],
         
         // Appearance
         appearance: {
