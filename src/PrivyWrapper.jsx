@@ -12,124 +12,53 @@ const PrivyWrapper = ({ children }) => {
     <PrivyProvider
       appId={appId}
       config={{
-        // Login methods - prioritize external wallet connections for Plasma Network
-        loginMethods: ['wallet'], // Only external wallets for better Plasma compatibility
+        // Login methods - ALL wallet options
+        loginMethods: ['wallet', 'email', 'sms'],
+        
+        // Wallet connectors - Enable ALL popular wallets
+        walletConnectors: ['metamask', 'coinbase_wallet', 'wallet_connect', 'rainbow', 'phantom'],
         
         // Appearance
         appearance: {
           theme: 'dark',
-          accentColor: '#1DB954',
-          logo: undefined,
-          showWalletLoginFirst: true,
-          walletList: [
-            'metamask',
-            'coinbase_wallet',
-            'wallet_connect',
-            'detected_wallets'
-          ],
+          accentColor: '#E0004F',
+          logo: 'https://plasm-x.exchange/logo.png',
+          showWalletLoginFirst: true // Show wallet options first
         },
         
-        
-        // Default chain should be Plasma
-        defaultChain: {
-          id: 9745,
-          name: 'Plasma Network',
-          nativeCurrency: {
-            name: 'XPL',
-            symbol: 'XPL',
-            decimals: 18,
-          },
-          rpcUrls: {
-            default: {
-              http: ['https://rpc.plasma.to'],
-            },
-          },
-          blockExplorers: {
-            default: {
-              name: 'Plasma Explorer',
-              url: 'https://explorer.plasma.to',
-            },
-          },
-        },
-
-        // Supported chains - Plasma Network + Base
+        // Supported chains - XPL and Base
         supportedChains: [
           {
             id: 9745,
             name: 'Plasma Network',
-            nativeCurrency: {
-              name: 'XPL',
-              symbol: 'XPL',
-              decimals: 18,
-            },
+            network: 'plasma',
+            nativeCurrency: { name: 'XPL', symbol: 'XPL', decimals: 18 },
             rpcUrls: {
-              default: {
-                http: ['https://rpc.plasma.to'],
-              },
+              default: { http: ['https://rpc.plasma.to'] },
+              public: { http: ['https://rpc.plasma.to'] }
             },
             blockExplorers: {
-              default: {
-                name: 'Plasma Explorer',
-                url: 'https://explorer.plasma.to',
-              },
-            },
+              default: { name: 'Plasma Explorer', url: 'https://plasma.blockscout.com' }
+            }
           },
           {
             id: 8453,
             name: 'Base',
-            nativeCurrency: {
-              name: 'Ether',
-              symbol: 'ETH',
-              decimals: 18,
-            },
+            network: 'base',
+            nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
             rpcUrls: {
-              default: {
-                http: ['https://mainnet.base.org'],
-              },
+              default: { http: ['https://mainnet.base.org'] },
+              public: { http: ['https://mainnet.base.org'] }
             },
             blockExplorers: {
-              default: {
-                name: 'BaseScan',
-                url: 'https://basescan.org',
-              },
-            },
-          },
+              default: { name: 'BaseScan', url: 'https://basescan.org' }
+            }
+          }
         ],
-
-        // Wallet connection settings
-        walletConnectCloudProjectId: undefined, // Use default
         
-        // Legal policies
-        legalRequirements: {
-          termsAndConditionsUrl: undefined,
-          privacyPolicyUrl: undefined,
-        },
-
-        // Additional configuration for Plasma Network compatibility
-        experimentalFeatures: {
-          noPromptOnSignature: true, // Reduce signature prompts
-        },
-        
-        // Wallet configuration for custom chains
-        walletConnect: {
-          version: '2',
-        },
-        
-        // Additional config for iframe compatibility
-        mfa: {
-          noPromptOnMfaRequired: false,
-        },
-        
-        // Replit environment compatibility - Fix CSP issues
-        customAuth: {
-          enabled: false,
-        },
-
-        // Enhanced wallet connection settings
+        // Embedded wallet config
         embeddedWallets: {
-          createOnLogin: 'off',
-          requireUserPasswordOnCreate: false,
-          noPromptOnSignature: true,
+          createOnLogin: 'users-without-wallets'
         }
       }}
     >
