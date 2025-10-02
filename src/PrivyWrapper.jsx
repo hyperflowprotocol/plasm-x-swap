@@ -13,7 +13,7 @@ const PrivyWrapper = ({ children }) => {
       appId={appId}
       config={{
         // Login methods - prioritize external wallet connections for Plasma Network
-        loginMethods: ['wallet'], // Only external wallets for better Plasma compatibility
+        loginMethods: ['metamask', 'wallet_connect', 'detected_wallets'],
         
         // Appearance
         appearance: {
