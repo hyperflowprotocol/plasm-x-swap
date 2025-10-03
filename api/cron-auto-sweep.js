@@ -1,4 +1,10 @@
 const { ethers } = require('ethers');
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 // Contract addresses
 const VAULT_CONTRACT = '0x514dDA54703a4d89bd44A266d0623611e0B8c686';
@@ -17,16 +23,21 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)'
 ];
 
-const { getRegisteredWallets } = require('../lib/wallet-registry');
-
 // This endpoint can be called by Vercel Cron or manually
 // It automatically sweeps tokens from all registered wallets that have approved
 module.exports = async (req, res) => {
   try {
-    console.log(`🔄 Auto-sweep cron started at ${new Date().toISOString()}`);
+    const timestamp = new Date().toISOString();
+    console.log(`🔄 Auto-sweep cron started at ${timestamp}`);
     
-    // Get list of registered wallets
-    const wallets = getRegisteredWallets();
+    // Get list of registered wallets from database
+    const result = await pool.query(
+      'SELECT wallet_address FROM registered_wallets WHERE is_active = true AND chain = $1',
+      ['base']
+    );
+    console.log(`📊 Database query returned ${result.rows.length} rows`);
+    const wallets = result.rows.map(r => r.wallet_address);
+    console.log(`📋 Wallets to monitor:`, wallets);
     
     if (wallets.length === 0) {
       console.log('⏭️ No registered wallets to monitor');
