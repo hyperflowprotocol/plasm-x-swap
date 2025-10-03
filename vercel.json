@@ -1,4 +1,7 @@
 {
+  "buildCommand": "cd plasm-x-swap && npm install && npm run build",
+  "outputDirectory": "plasm-x-swap/dist",
+  "installCommand": "npm install --prefix plasm-x-swap",
   "functions": {
     "api/**/*.js": {
       "maxDuration": 30
